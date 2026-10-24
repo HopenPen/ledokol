@@ -28,6 +28,7 @@ export interface ImportResult { company: Company; rows_total: number; rows_new: 
 export interface PaymentInput { op_date: string; amount: string; direction: 'in' | 'out'; counterparty_name: string; counterparty_inn: string; purpose: string; balance_eod: string }
 export interface PlanFactRow { event_id: string | null; title: string; planned_date: string; planned_amount: number; status: string; actual_amount: number; actual_date: string | null }
 export interface ScenarioResult { base: Forecast; scenario: Forecast; delta: { base_first_gap: string | null; scenario_first_gap: string | null; base_min_p50: number; scenario_min_p50: number; extra_shortfall: number } }
+export interface RegistrationInfo { email_delivery: 'disabled' | 'unavailable' | 'local' | 'smtp'; local_mailbox_url: string | null }
 
 const TOKEN_KEY = 'cashflow.token'
 function readToken(): string | null {
@@ -66,6 +67,7 @@ async function request<T>(method: string, path: string, body?: unknown, headers:
 }
 
 export const api = {
+  registrationInfo: () => request<RegistrationInfo>('GET', '/api/auth/registration-info'),
   register: (email: string, password: string) => request<{ message: string }>('POST', '/api/auth/register', { email, password }),
   resendVerification: (email: string) => request<{ message: string }>('POST', '/api/auth/resend-verification', { email }),
   verifyEmail: (token: string) => request<{ message: string }>('POST', '/api/auth/verify-email', { token }),
