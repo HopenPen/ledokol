@@ -28,6 +28,11 @@ export interface ImportResult { company: Company; rows_total: number; rows_new: 
 export interface PaymentInput { op_date: string; amount: string; direction: 'in' | 'out'; counterparty_name: string; counterparty_inn: string; purpose: string; balance_eod: string }
 export interface PlanFactRow { event_id: string | null; title: string; planned_date: string; planned_amount: number; status: string; actual_amount: number; actual_date: string | null }
 export interface ScenarioResult { base: Forecast; scenario: Forecast; delta: { base_first_gap: string | null; scenario_first_gap: string | null; base_min_p50: number; scenario_min_p50: number; extra_shortfall: number } }
+export interface EventInput {
+  event_date: string; amount: string; direction: 'in' | 'out'; title: string
+  kind: 'manual' | 'invoice_out' | 'invoice_in' | 'tax' | 'contract'
+  confidence: 'certain' | 'likely' | 'unsure'; counterparty_key?: string
+}
 
 const TOKEN_KEY = 'cashflow.token'
 function readToken(): string | null {
@@ -66,6 +71,7 @@ async function request<T>(method: string, path: string, body?: unknown, headers:
 }
 
 export const api = {
+  registrationInfo: () => request<{ email_delivery: 'unavailable' | 'local' | 'smtp'; local_mailbox_url: string | null }>('GET', '/api/auth/registration-info'),
   register: (email: string, password: string) => request<{ message: string }>('POST', '/api/auth/register', { email, password }),
   resendVerification: (email: string) => request<{ message: string }>('POST', '/api/auth/resend-verification', { email }),
   verifyEmail: (token: string) => request<{ message: string }>('POST', '/api/auth/verify-email', { token }),
@@ -84,13 +90,13 @@ export const api = {
   patchCompany: (id: string, body: Partial<{ name: string; industry: string; tax_regime: string; min_balance: string }>) => request<Company>('PATCH', `/api/companies/${id}`, body),
   events: (id: string) => request<EventRow[]>('GET', `/api/companies/${id}/events`),
   // Idempotency-Key создаётся один раз на открытие формы: двойной клик не создаст два события.
-  addEvent: (id: string, body: object, idemKey: string) => request<EventRow>('POST', `/api/companies/${id}/events`, body, { 'Idempotency-Key': idemKey }),
+  addEvent: (id: string, body: EventInput, idemKey: string) => request<EventRow>('POST', `/api/companies/${id}/events`, body, { 'Idempotency-Key': idemKey }),
   patchEvent: (id: string, eventId: string, body: { event_date?: string; status?: 'expected' | 'cancelled' }) => request<EventRow>('PATCH', `/api/companies/${id}/events/${eventId}`, body),
   planFactDaily: (id: string) => request<DailyPlanFact>('GET', `/api/companies/${id}/plan-fact/daily`),
   preview: (id: string, body: object) => request<Forecast>('POST', `/api/companies/${id}/forecast/preview`, body),
   deleteEvent: (id: string, eventId: string) => request<void>('DELETE', `/api/companies/${id}/events/${eventId}`),
   scenario: (id: string, body: object) => request<ScenarioResult>('POST', `/api/companies/${id}/scenarios`, body),
-  operations: (id: string, offset = 0, category = '') => request<Operation[]>('GET', `/api/companies/${id}/operations?limit=100&offset=${offset}${category ? `&category=${category}` : ''}`),
+  operations: (id: string, offset = 0, category = '', query = '') => request<Operation[]>('POST', `/api/companies/${id}/operations/search`, { limit: 100, offset, category: category || null, query }),
   categories: () => request<{ code: string; label: string }[]>('GET', '/meta/categories'),
   patchCategory: (opId: string, category: string, applyToCounterparty: boolean) => request<Operation[]>('PATCH', `/api/operations/${opId}/category`, { category, apply_to_counterparty: applyToCounterparty }),
   planFact: (id: string) => request<PlanFactRow[]>('GET', `/api/companies/${id}/plan-fact`),

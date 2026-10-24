@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// График остатка: факт (серый) + прогноз (зелёная линия) + «обычный разброс» P10–P90 (полоса) + порог (красный пунктир).
+// График остатка: факт + прогноз (синий) + «обычный разброс» P10–P90 и порог (серый пунктир).
 // Сравнение сценария — вторая линия (оранжевая). Одна ось Y, без двойных шкал.
 import { echarts } from '../charts'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -11,6 +11,8 @@ const props = defineProps<{
   points: Point[]
   threshold: number
   compare?: Point[]
+  compareLabel?: string
+  forecastLabel?: string
 }>()
 
 const el = ref<HTMLDivElement>()
@@ -26,28 +28,35 @@ function render() {
   const band = props.points.map((p) => [p.date, p.p90 - p.p10])
   chart.setOption({
     animation: false,
-    grid: { left: 64, right: 16, top: 16, bottom: 32 },
+    grid: { left: 8, right: 12, top: 48, bottom: 36, containLabel: true },
+    legend: { data: ['Было', props.forecastLabel ?? 'Прогноз', ...(props.compare ? [props.compareLabel ?? 'Если так случится'] : [])],
+              top: 8, left: 0, textStyle: { color: '#4a5d55' } },
     tooltip: {
       trigger: 'axis',
       formatter: (items: { seriesName: string; value: [string, number] }[]) => {
         const d = items[0]?.value[0]
         const p = props.points.find((x) => x.date === d)
+        const compared = props.compare?.find((x) => x.date === d)
         const rows = items.filter((i) => !i.seriesName.startsWith('_')).map((i) => `${i.seriesName}: ${rub(i.value[1])}`)
-        if (p && p.prob_below > 0.05) rows.push(`шанс нехватки: ${Math.round(p.prob_below * 100)}%`)
+        if (p && compared) {
+          rows.push(`Риск (${props.forecastLabel ?? 'прогноз'}): ${Math.round(p.prob_below * 100)}%`)
+          rows.push(`Риск (${props.compareLabel ?? 'сценарий'}): ${Math.round(compared.prob_below * 100)}%`)
+        } else if (p && p.prob_below > 0.05) rows.push(`Шанс нехватки: ${Math.round(p.prob_below * 100)}%`)
         return [humanDate(d), ...rows].join('<br/>')
       },
     },
-    xAxis: { type: 'time', axisLabel: { formatter: (v: number) => humanDate(new Date(v).toISOString().slice(0, 10)) } },
-    yAxis: { type: 'value', axisLabel: { formatter: (v: number) => rub(v) }, splitLine: { lineStyle: { color: '#e6ece9' } } },
+    xAxis: { type: 'time', name: 'Дата', nameLocation: 'middle', nameGap: 28,
+             axisLabel: { hideOverlap: true, formatter: (v: number) => humanDate(new Date(v).toISOString().slice(0, 10)) } },
+    yAxis: { type: 'value', name: 'Остаток, ₽', nameGap: 18, axisLabel: { formatter: (v: number) => rub(v) }, splitLine: { lineStyle: { color: '#dde6e1' } } },
     series: [
       { name: '_low', type: 'line', data: lower, stack: 'band', stackStrategy: 'all', symbol: 'none', lineStyle: { opacity: 0 } },
-      { name: '_band', type: 'line', data: band, stack: 'band', stackStrategy: 'all', symbol: 'none', lineStyle: { opacity: 0 }, areaStyle: { color: '#cfe3d8' } },
-      { name: 'Было', type: 'line', data: hist, symbol: 'none', lineStyle: { color: '#7c8c85', width: 2 } },
-      { name: 'Прогноз', type: 'line', data: p50, symbol: 'none', lineStyle: { color: '#0f7b57', width: 2 },
+      { name: '_band', type: 'line', data: band, stack: 'band', stackStrategy: 'all', symbol: 'none', lineStyle: { opacity: 0 }, areaStyle: { color: 'rgba(42, 120, 214, 0.18)' } },
+      { name: 'Было', type: 'line', data: hist, symbol: 'none', itemStyle: { color: '#13241d' }, lineStyle: { color: '#13241d', width: 2 } },
+      { name: props.forecastLabel ?? 'Прогноз', type: 'line', data: p50, symbol: 'none', itemStyle: { color: '#2a78d6' }, lineStyle: { color: '#2a78d6', width: 2 },
         markLine: { silent: true, symbol: 'none', data: [{ yAxis: props.threshold }],
-                    lineStyle: { color: '#b42318', type: 'dashed' }, label: { formatter: 'порог', position: 'insideStartTop', color: '#b42318' } } },
-      ...(props.compare ? [{ name: 'Если так случится', type: 'line', data: [...joint, ...props.compare.map((p) => [p.date, p.p50])],
-                             symbol: 'none', lineStyle: { color: '#a8650f', width: 2, type: 'dashed' } }] : []),
+                    lineStyle: { color: '#4a5d55', type: 'dashed' }, label: { formatter: 'порог', position: 'insideStartTop', color: '#4a5d55' } } },
+      ...(props.compare ? [{ name: props.compareLabel ?? 'Если так случится', type: 'line', data: [...joint, ...props.compare.map((p) => [p.date, p.p50])],
+                             symbol: 'none', itemStyle: { color: '#eb6834' }, lineStyle: { color: '#eb6834', width: 2, type: 'dashed' } }] : []),
     ],
   }, true)
 }
@@ -59,7 +68,7 @@ onMounted(() => {
 })
 const onResize = () => chart?.resize()
 onBeforeUnmount(() => { window.removeEventListener('resize', onResize); chart?.dispose() })
-watch(() => [props.points, props.compare, props.history, props.threshold], render, { deep: true })
+watch(() => [props.points, props.compare, props.history, props.threshold, props.compareLabel, props.forecastLabel], render, { deep: true })
 </script>
 
 <template>

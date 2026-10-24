@@ -1,25 +1,25 @@
 /* Токены дизайна. Одна яркая вещь на экране — фраза-ответ; всё остальное спокойное.
    Зелёный — «деньги есть», красный — только риск нехватки. */
 :root {
-  --paper: #f3f7f5;
+  --paper: #fafbfa;
   --surface: #ffffff;
-  --ink: #13241d;
-  --ink-2: #4a5d55;
-  --muted: #7c8c85;
-  --line: #dde6e1;
-  --green: #0f7b57;
-  --green-wash: #e3f1ea;
+  --ink: #141c20;
+  --ink-2: #52605b;
+  --muted: #63716b;
+  --line: #e2e7e4;
+  --green: #078345;
+  --green-wash: #edf7f0;
   --band: #cfe3d8;
   --risk: #b42318;
   --risk-wash: #fbeae8;
   --warn: #a8650f;
   --warn-wash: #fbf1e2;
-  --radius-s: 6px;
+  --radius-s: 8px;
   --radius-l: 14px;
   font-family: 'Onest', system-ui, sans-serif;
   color: var(--ink);
   background: var(--paper);
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.5;
 }
 
@@ -27,24 +27,34 @@
 body { margin: 0; }
 h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
 button, input, select { font: inherit; color: inherit; }
+button, a, input, select { -webkit-tap-highlight-color: transparent; }
+input { accent-color: var(--green); caret-color: var(--green); }
+::selection { background: #d8efdf; color: var(--ink); }
 .num { font-variant-numeric: tabular-nums; }
 
 .btn {
   border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius-s);
-  padding: 8px 14px; cursor: pointer;
+  min-height: 42px; padding: 9px 16px; cursor: pointer; transition: background-color 140ms, border-color 140ms;
 }
 .btn:hover { border-color: var(--ink-2); }
 .btn-primary { background: var(--green); border-color: var(--green); color: #fff; }
 .btn-primary:hover { background: #0b6647; }
+.btn:disabled { opacity: 0.55; cursor: not-allowed; }
 .btn:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible {
   outline: 2px solid var(--green); outline-offset: 2px;
 }
 
-.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-l); padding: 20px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-l); padding: 24px; }
 .field { display: grid; gap: 4px; margin-bottom: 12px; }
 .field input, .field select {
-  border: 1px solid var(--line); border-radius: var(--radius-s); padding: 8px 10px; background: var(--surface);
+  min-height: 44px; min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-s); padding: 10px 12px; background: var(--surface);
 }
+input::placeholder { color: var(--muted); opacity: 1; }
+input[type="range"] { min-height: 32px; padding: 0; width: 100%; }
+.field { font-size: 14px; font-weight: 500; }
+.field input, .field select { font-size: 15px; font-weight: 400; }
+.field input:disabled, .field select:disabled { color: var(--ink-2); }
+@media (max-width: 600px) { .card { padding: 18px; } }
 .badge { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--paper); color: var(--ink-2); }
 .badge-manual { background: var(--green-wash); color: var(--green); }
 .badge-1c { background: #eaeefb; color: #3446a0; }

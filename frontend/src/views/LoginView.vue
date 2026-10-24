@@ -31,7 +31,7 @@ async function submit() {
 <template>
   <AuthLayout>
     <form @submit.prevent="submit">
-      <h1>Войти в приложение</h1>
+      <h1>Вход в систему</h1>
       <p class="lead">Прогноз остатка на счёте и предупреждения, если денег может не хватить.</p>
       <label class="field">Email или логин <input v-model="login" autocomplete="username" maxlength="254" required /></label>
       <label class="field">Пароль <input v-model="password" type="password" autocomplete="current-password" required /></label>

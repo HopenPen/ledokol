@@ -77,7 +77,7 @@ async function onSaved() {
       </ul>
     </section>
 
-    <AddEventModal v-if="modal" :company-id="route.params.id as string" :min-date="f.as_of"
+    <AddEventModal v-if="modal" :company-id="route.params.id as string" :base="f" :history="dashboard.history"
                    :preset-title="modal.preset" @close="modal = null" @saved="onSaved" />
   </div>
 </template>
