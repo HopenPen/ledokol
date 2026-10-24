@@ -30,7 +30,7 @@ _MESSAGE = "Если адресу требуется подтверждение,
 
 def _registration_message() -> str:
     if not get_settings().require_email_verification:
-        return "Можно войти с указанным email и паролем. Подтверждение почты временно отключено."
+        return "Можно войти с указанным email и паролем."
     return _MESSAGE
 
 

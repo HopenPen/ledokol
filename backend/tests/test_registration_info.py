@@ -3,6 +3,11 @@ from app.api.routes import auth
 from app.core.config import Settings
 
 
+def test_registration_defaults_to_no_email_verification(monkeypatch):
+    monkeypatch.delenv("CASHFLOW_REQUIRE_EMAIL_VERIFICATION", raising=False)
+    assert Settings(_env_file=None, env="test").require_email_verification is False
+
+
 def test_registration_info_disabled_needs_no_smtp(client, monkeypatch):
     settings = Settings(_env_file=None, env="test", require_email_verification=False, smtp_host=None)
     monkeypatch.setattr(auth, "get_settings", lambda: settings)

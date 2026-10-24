@@ -131,7 +131,7 @@ def test_temporary_registration_without_email_keeps_password_and_company_isolati
     monkeypatch.setattr(get_settings(), "require_email_verification", False)
     mailbox.fail = True  # SMTP не нужен даже при полной недоступности провайдера.
     first = signup(client)
-    assert first.status_code == 202 and "временно отключено" in first.json()["message"]
+    assert first.status_code == 202 and first.json()["message"] == "Можно войти с указанным email и паролем."
     assert signup(client, "OWNER@example.com", "attacker-password").json() == first.json()
     assert mailbox.messages == []
     assert login(client, password="attacker-password").status_code == 401
