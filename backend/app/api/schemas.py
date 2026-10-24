@@ -343,3 +343,4 @@ class PreviewIn(ScenarioIn):
     """Черновик: «а если не учитывать эту операцию и добавить вот это событие» — без сохранения."""
     exclude_operation_ids: list[str] = Field(default_factory=list, max_length=200)
     extra_events: list[EventIn] = Field(default_factory=list, max_length=50)
+    horizon: int | None = Field(default=None, ge=1, le=90)

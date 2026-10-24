@@ -98,7 +98,8 @@ def quality_of(cm: CompanyModel) -> QualityReport:
 
 
 def run_preview(session: Session, company: Company, *, exclude_db_ids: set[str],
-                extra_events: list[PlannedEvent], scenario: Scenario | None = None) -> ForecastResult:
+                extra_events: list[PlannedEvent], scenario: Scenario | None = None,
+                horizon: int | None = None) -> ForecastResult:
     """Черновик правок: пересчёт без записи в БД и без снимка.
 
     Исключённые операции не удаляются из истории остатка (факт есть факт) — они просто не учат модель.
@@ -111,5 +112,5 @@ def run_preview(session: Session, company: Company, *, exclude_db_ids: set[str],
         ops = cm.prep.ops[~cm.prep.ops["db_id"].isin(exclude_db_ids)]
         fitted = fit(ops, cm.prep.panel)
     events = planned_events(session, company, fitted.as_of) + extra_events
-    return forecast(fitted, events, horizon=s.forecast_horizon, n_sims=s.forecast_sims, seed=s.forecast_seed,
+    return forecast(fitted, events, horizon=horizon or s.forecast_horizon, n_sims=s.forecast_sims, seed=s.forecast_seed,
                     threshold=float(company.min_balance), scenario=scenario, data_warnings=cm.prep.quality.warnings)
