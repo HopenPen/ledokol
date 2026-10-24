@@ -62,9 +62,26 @@ def normalize(df: pd.DataFrame) -> pd.DataFrame:
     out["direction"] = out["direction"].map(DIRECTION_MAP)
     for col in ("counterparty_inn", "counterparty_name", "payment_purpose"):
         out[col] = out[col].fillna("").astype(str).str.strip()
-    valid = (out["operation_date"].notna() & out["amount"].gt(0) & out["direction"].notna()
-             & out["balance_eod"].notna())
+    for col in ("company_id", "operation_id"):
+        out[col] = out[col].fillna("").astype(str).str.strip()
+    checks = {
+        "operation_date": out["operation_date"].notna(),
+        "amount": out["amount"].gt(0) & np.isfinite(out["amount"]) & out["amount"].lt(10**14),
+        "direction": out["direction"].notna(),
+        "balance_eod": np.isfinite(out["balance_eod"]) & out["balance_eod"].abs().lt(10**14),
+        "company_id": out["company_id"].str.len().between(1, 32),
+        "operation_id": out["operation_id"].str.len().between(1, 64),
+        "counterparty_inn": out["counterparty_inn"].str.fullmatch(r"(?:[0-9]{10}|[0-9]{12})?"),
+    }
+    valid = pd.DataFrame(checks).all(axis=1)
     out.attrs["rows_rejected"] = int((~valid).sum())
+    # Только номера записей CSV, без исходных значений, имён и назначений.
+    out.attrs["rejected_lines"] = [i + 2 for i, accepted in enumerate(valid) if not accepted][:20]
+    out.attrs["invalid_fields"] = [name for name, accepted in checks.items() if not accepted.all()]
+    if len(out) and not valid.any():
+        lines = ", ".join(map(str, out.attrs["rejected_lines"]))
+        fields = ", ".join(out.attrs["invalid_fields"])
+        raise StatementFormatError(f"Нет корректных операций. Строки CSV: {lines}. Проверьте поля: {fields}")
     out = out[valid].sort_values(["company_id", "operation_date", "operation_id"]).reset_index(drop=True)
     out["signed"] = np.where(out["direction"].eq("in"), out["amount"], -out["amount"])
     out["cp_key"] = out["counterparty_inn"].where(out["counterparty_inn"].ne(""), out["counterparty_name"])

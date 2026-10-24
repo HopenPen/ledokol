@@ -20,6 +20,9 @@ def _make_engine():
         @event.listens_for(eng, "connect")
         def _fk_on(dbapi_conn, _):  # SQLite по умолчанию не проверяет внешние ключи
             dbapi_conn.execute("PRAGMA foreign_keys=ON")
+            # Встроенный lower SQLite знает только ASCII: поиск «аренда» должен находить «Аренда».
+            dbapi_conn.create_function("lower", 1, lambda value: value.lower() if value is not None else None,
+                                      deterministic=True)
     return eng
 
 

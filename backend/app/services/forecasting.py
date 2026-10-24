@@ -16,16 +16,19 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.db.models import Company, PlannedEvent as PlannedEventRow
+from app.db.models import Company
+from app.db.models import PlannedEvent as PlannedEventRow
 from app.domain.forecast import FittedModel, fit, forecast
 from app.domain.ingest import QualityReport
 from app.domain.pipeline import PreparedCompany, prepare_company
+from app.domain.risk import human_date
 from app.domain.scenarios import Scenario
 from app.domain.types import ForecastResult, PlannedEvent
 from app.services.classifier import get_classifier
 from app.services.company_data import apply_user_categories, load_operations_frame
-from app.services.events_mapping import to_domain_event  # noqa: F401 — реэкспорт для роутов
+from app.services.events_mapping import to_domain_event
 from app.services.snapshots import save_snapshot
+
 
 @dataclass(slots=True)
 class CompanyModel:
@@ -58,6 +61,27 @@ class _ModelCache:
 _cache = _ModelCache()
 
 
+def _describe_current_shortfall(result: ForecastResult) -> ForecastResult:
+    """Последний известный остаток уже ниже порога: будущая дата не должна скрывать текущую нехватку."""
+    if result.last_balance >= result.threshold or not result.points:
+        return result
+    when = human_date(result.as_of)
+    missing = -result.last_balance if result.last_balance < 0 else result.threshold - result.last_balance
+    amount = f"{missing:,.2f}".replace(",", " ").replace(".", ",") + " ₽"
+    if result.last_balance < 0:
+        start = f"По данным на {when} денег уже не хватает: {amount}."
+    else:
+        start = f"По данным на {when} остаток ниже установленного минимума на {amount}."
+    target = "нуля" if result.threshold == 0 else "установленного минимума"
+    recovery = next((point.day for point in result.points if point.p50 >= result.threshold), None)
+    if recovery:
+        end = f" По прогнозу остаток впервые достигнет {target} {human_date(recovery)}."
+    else:
+        end = f" На горизонте {len(result.points)} рабочих дней остаток по прогнозу не достигает {target}."
+    result.headline = start + end
+    return result
+
+
 def company_model(session: Session, company: Company) -> CompanyModel:
     key = (company.id, company.data_version)
     if (hit := _cache.get(key)) is not None:
@@ -80,14 +104,15 @@ def planned_events(session: Session, company: Company, after: date) -> list[Plan
 
 
 def run_forecast(session: Session, company: Company, scenario: Scenario | None = None,
-                 horizon: int | None = None) -> tuple[ForecastResult, CompanyModel]:
+                 horizon: int | None = None, *, save: bool = True) -> tuple[ForecastResult, CompanyModel]:
     s = get_settings()
     cm = company_model(session, company)
     events = planned_events(session, company, cm.fitted.as_of)
     result = forecast(cm.fitted, events, horizon=horizon or s.forecast_horizon, n_sims=s.forecast_sims,
                       seed=s.forecast_seed, threshold=float(company.min_balance), scenario=scenario,
                       data_warnings=cm.prep.quality.warnings)
-    if scenario is None and horizon in (None, s.forecast_horizon):
+    _describe_current_shortfall(result)
+    if save and scenario is None and horizon in (None, s.forecast_horizon):
         # Сохраняем только «официальный» прогноз: сценарии и черновики — это не обещание, их не сравниваем с фактом.
         save_snapshot(session, company, result, events)
     return result, cm
@@ -98,7 +123,8 @@ def quality_of(cm: CompanyModel) -> QualityReport:
 
 
 def run_preview(session: Session, company: Company, *, exclude_db_ids: set[str],
-                extra_events: list[PlannedEvent], scenario: Scenario | None = None) -> ForecastResult:
+                extra_events: list[PlannedEvent], scenario: Scenario | None = None,
+                horizon: int | None = None) -> ForecastResult:
     """Черновик правок: пересчёт без записи в БД и без снимка.
 
     Исключённые операции не удаляются из истории остатка (факт есть факт) — они просто не учат модель.
@@ -111,5 +137,6 @@ def run_preview(session: Session, company: Company, *, exclude_db_ids: set[str],
         ops = cm.prep.ops[~cm.prep.ops["db_id"].isin(exclude_db_ids)]
         fitted = fit(ops, cm.prep.panel)
     events = planned_events(session, company, fitted.as_of) + extra_events
-    return forecast(fitted, events, horizon=s.forecast_horizon, n_sims=s.forecast_sims, seed=s.forecast_seed,
-                    threshold=float(company.min_balance), scenario=scenario, data_warnings=cm.prep.quality.warnings)
+    result = forecast(fitted, events, horizon=horizon or s.forecast_horizon, n_sims=s.forecast_sims, seed=s.forecast_seed,
+                      threshold=float(company.min_balance), scenario=scenario, data_warnings=cm.prep.quality.warnings)
+    return _describe_current_shortfall(result)

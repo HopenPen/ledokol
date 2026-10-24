@@ -12,7 +12,7 @@ from app.api.schemas import (
 from app.db.models import PlannedEvent as PlannedEventRow
 from app.domain.planfact import compare_daily, match_events
 from app.domain.scenarios import ClientDelay, ExtraExpense, Scenario
-from app.domain.types import Direction, EventSource, ForecastResult, PlannedEvent
+from app.domain.types import ForecastResult
 from app.integrations.http import IntegrationError
 from app.llm.assistant import ask
 from app.services.events import IdempotencyConflict, NewEvent, cancel_event, create_manual_event
@@ -90,12 +90,12 @@ def _scenario(body: ScenarioIn) -> Scenario:
 @router.post("/forecast/preview", response_model=ForecastOut)
 def preview(company: OwnedCompany, body: PreviewIn, session: DbSession) -> ForecastOut:
     """Черновик правок: исключить операции из обучения, добавить события, наложить сценарий. Ничего не сохраняет."""
-    extra = [PlannedEvent(event_date=e.event_date, amount=float(e.amount), direction=Direction(e.direction),
-                          title=f"{e.title} (черновик)", category="other", source=EventSource.SCENARIO)
-             for e in body.extra_events]
+    # Та же конвертация, что после сохранения: уверенность, тип и задержка оплаты не должны меняться.
+    # Строки остаются вне сессии — предпросмотр не записывает события в БД.
+    extra = [to_domain_event(PlannedEventRow(source="manual", **e.model_dump())) for e in body.extra_events]
     try:
         result = run_preview(session, company, exclude_db_ids=set(body.exclude_operation_ids),
-                             extra_events=extra, scenario=_scenario(body))
+                             extra_events=extra, scenario=_scenario(body), horizon=body.horizon)
     except LookupError:
         raise HTTPException(status.HTTP_409_CONFLICT, "Сначала загрузите выписку") from None
     return ForecastOut.of(result)

@@ -44,7 +44,7 @@ def authenticate(session: Session, login: str, password: str) -> User | None:
     if user is None or not verify_password(password, user.password_hash):
         return None
     identity = identity or session.get(UserEmail, user.id)
-    if identity and identity.verified_at is None:
+    if get_settings().require_email_verification and identity and identity.verified_at is None:
         raise EmailNotVerified
     return user
 
@@ -74,11 +74,15 @@ def register(session: Session, email: str, password: str, mailer: VerificationMa
         user = User(login="email:" + uuid7(), password_hash=hash_password(password))
         session.add(user)
         session.flush()
-        identity = UserEmail(user_id=user.id, email=email, email_key=key)
-        token = _issue(identity, datetime.now(UTC))
+        now = datetime.now(UTC)
+        # Временный вход без письма не означает, что пользователь владеет адресом.
+        identity = UserEmail(user_id=user.id, email=email, email_key=key,
+                             last_sent_at=now - timedelta(seconds=60))
+        token = _issue(identity, now) if get_settings().require_email_verification else None
         session.add(identity)
         session.flush()
-        _deliver(mailer, identity, token)
+        if token is not None:
+            _deliver(mailer, identity, token)
         session.commit()
     except IntegrityError:
         session.rollback()  # параллельная регистрация того же адреса
@@ -90,6 +94,8 @@ def register(session: Session, email: str, password: str, mailer: VerificationMa
 
 
 def resend_verification(session: Session, email: str, mailer: VerificationMailer) -> None:
+    if not get_settings().require_email_verification:
+        return
     identity = session.scalar(select(UserEmail).where(UserEmail.email_key == email_key(email)).with_for_update())
     now = datetime.now(UTC)
     if identity is None or identity.verified_at is not None:

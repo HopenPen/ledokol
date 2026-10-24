@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Header, HTTPException, Query, Response, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.api.deps import CurrentUser, DbSession, OwnedCompany
-from app.api.schemas import CategoryPatch, OperationOut, PaymentIn
+from app.api.schemas import CategoryPatch, OperationOut, OperationSearchIn, PaymentIn
 from app.db.models import Company, Operation
 from app.domain.categories import CATEGORIES, label
 from app.services.events import IdempotencyConflict
@@ -43,6 +43,22 @@ def list_operations(company: OwnedCompany, session: DbSession, limit: int = Quer
     rows = session.scalars(q.order_by(Operation.op_date.desc(), Operation.source_operation_id.desc())
                            .limit(limit).offset(offset))
     return [_out(r) for r in rows]
+
+
+@router.post("/companies/{company_id}/operations/search", response_model=list[OperationOut])
+def search_operations(company: OwnedCompany, body: OperationSearchIn, session: DbSession) -> list[OperationOut]:
+    """Поиск до пагинации. Строка в теле запроса, чтобы имена не попадали в access log как часть URL."""
+    query = select(Operation).where(Operation.company_id == company.id)
+    if body.category:
+        query = query.where(Operation.category == body.category)
+    if body.query:
+        matching_categories = [code for code in CATEGORIES if body.query.lower() in label(code).lower()]
+        query = query.where(or_(Operation.counterparty_name.icontains(body.query, autoescape=True),
+                                Operation.purpose.icontains(body.query, autoescape=True),
+                                Operation.category.in_(matching_categories)))
+    rows = session.scalars(query.order_by(Operation.op_date.desc(), Operation.source_operation_id.desc())
+                           .offset(body.offset).limit(body.limit))
+    return [_out(row) for row in rows]
 
 
 @router.patch("/operations/{operation_id}/category", response_model=list[OperationOut])

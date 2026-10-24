@@ -40,6 +40,11 @@ class AuthMessage(BaseModel):
     message: str
 
 
+class RegistrationInfoOut(BaseModel):
+    email_delivery: Literal["disabled", "unavailable", "local", "smtp"]
+    local_mailbox_url: str | None = None
+
+
 class TokenOut(BaseModel):
     access_token: str
     token_type: Literal["bearer"] = "bearer"
@@ -68,6 +73,7 @@ class CompanyCreate(_In):
 
 
 class QualityOut(BaseModel):
+    rows_rejected: int = 0
     rows_total: int
     duplicates: int
     balance_jumps: int
@@ -123,6 +129,13 @@ class PaymentIn(_In):
 class CategoryPatch(_In):
     category: str = Field(max_length=32)
     apply_to_counterparty: bool = True
+
+
+class OperationSearchIn(_In):
+    query: str = Field(default="", max_length=120)
+    category: str | None = Field(default=None, max_length=32)
+    limit: int = Field(default=100, ge=1, le=500)
+    offset: int = Field(default=0, ge=0)
 
 
 # --- events ---------------------------------------------------------------------------------------------------
@@ -330,3 +343,4 @@ class PreviewIn(ScenarioIn):
     """Черновик: «а если не учитывать эту операцию и добавить вот это событие» — без сохранения."""
     exclude_operation_ids: list[str] = Field(default_factory=list, max_length=200)
     extra_events: list[EventIn] = Field(default_factory=list, max_length=50)
+    horizon: int | None = Field(default=None, ge=1, le=90)

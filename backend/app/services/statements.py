@@ -61,6 +61,14 @@ def import_statement(session: Session, user: User, raw: bytes, company: Company 
             results.append(ImportResult(target, len(part), len(fresh), False, quality))
         if not results:
             raise StatementFormatError("В файле нет платежей выбранной компании")
+        rejected = int(parsed.frame.attrs.get("rows_rejected", 0))
+        if rejected:
+            lines = ", ".join(map(str, parsed.frame.attrs.get("rejected_lines", [])))
+            fields = ", ".join(parsed.frame.attrs.get("invalid_fields", []))
+            for result in results:
+                result.quality.rows_rejected = rejected
+                result.quality.warnings.append(
+                    f"В файле пропущено строк: {rejected}. Номера записей CSV: {lines}. Проверьте поля: {fields}")
         session.commit()
         return results
     except Exception:
