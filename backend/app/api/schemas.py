@@ -130,6 +130,13 @@ class CategoryPatch(_In):
     apply_to_counterparty: bool = True
 
 
+class OperationSearchIn(_In):
+    query: str = Field(default="", max_length=120)
+    category: str | None = Field(default=None, max_length=32)
+    limit: int = Field(default=100, ge=1, le=500)
+    offset: int = Field(default=0, ge=0)
+
+
 # --- events ---------------------------------------------------------------------------------------------------
 class EventIn(_In):
     event_date: date
