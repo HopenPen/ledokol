@@ -1,0 +1,11 @@
+*
+!Dockerfile
+!pyproject.toml
+!uv.lock
+!app/
+!app/**
+!migrations/
+!migrations/**
+!alembic.ini
+**/__pycache__/
+**/*.py[cod]

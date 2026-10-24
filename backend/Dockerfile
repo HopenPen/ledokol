@@ -8,7 +8,8 @@ COPY migrations ./migrations
 COPY alembic.ini ./
 RUN uv sync --no-dev && uv pip install "psycopg[binary]>=3.2"
 # Не root: приложению не нужны права на систему.
-RUN useradd --create-home appuser && chown -R appuser /app
+# Зависимости доступны для чтения; приложению нужен доступ на запись только в рабочий каталог.
+RUN useradd --create-home appuser && chown appuser /app
 USER appuser
 EXPOSE 8000
 # Схема БД — только миграциями: сначала upgrade head, потом API.

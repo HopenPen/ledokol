@@ -5,7 +5,9 @@ export const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', redirect: '/companies' },
-    { path: '/login', component: () => import('./views/LoginView.vue') },
+    { path: '/login', component: () => import('./views/LoginView.vue'), meta: { public: true } },
+    { path: '/register', component: () => import('./views/RegisterView.vue'), meta: { public: true } },
+    { path: '/verify-email', component: () => import('./views/VerifyEmailView.vue'), meta: { public: true } },
     { path: '/companies', component: () => import('./views/CompaniesView.vue') },
     {
       path: '/companies/:id',
@@ -21,5 +23,4 @@ export const router = createRouter({
   ],
 })
 
-// Без входа — только страница входа.
-router.beforeEach((to) => (to.path !== '/login' && !isLoggedIn() ? '/login' : true))
+router.beforeEach((to) => (!to.meta.public && !isLoggedIn() ? '/login' : true))

@@ -9,7 +9,7 @@ import pytest
 
 from app.domain.planfact import compare_daily
 from tests.conftest import make_company, to_case_csv
-from tests.test_api import _import, _login, client  # noqa: F401 — фикстура client
+from tests.test_api import _import, _login
 
 
 def test_compare_daily_flags_only_out_of_range():

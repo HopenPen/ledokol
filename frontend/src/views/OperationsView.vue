@@ -2,7 +2,9 @@
 import { inject, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { api, type Operation } from '../api'
-import { humanDate, rub } from '../format'
+import { humanDate } from '../format'
+import AddPaymentModal from '../components/AddPaymentModal.vue'
+import StatementUpload from '../components/StatementUpload.vue'
 
 const route = useRoute()
 const reload = inject<() => Promise<void>>('reload')!
@@ -13,9 +15,21 @@ const offset = ref(0)
 const editing = ref<string | null>(null)
 const applyAll = ref(true)
 const toast = ref('')
+const error = ref('')
+const adding = ref(false)
+const money = (value: string) => new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB' }).format(Number(value))
 const SOURCE = { rule: 'правило', counterparty: 'по контрагенту', ml: 'модель', user: 'вы', none: '—' } as Record<string, string>
 
-async function load() { ops.value = await api.operations(route.params.id as string, offset.value, filter.value) }
+async function load() {
+  error.value = ''
+  try { ops.value = await api.operations(route.params.id as string, offset.value, filter.value) }
+  catch (e) { error.value = (e as Error).message }
+}
+async function onSaved() {
+  adding.value = false
+  filter.value = ''; offset.value = 0
+  await Promise.all([load(), reload()])
+}
 onMounted(async () => { categories.value = await api.categories(); await load() })
 watch([filter, offset], load)
 
@@ -31,12 +45,16 @@ async function setCategory(op: Operation, code: string) {
   <section class="card">
     <header class="head">
       <h2>Операции</h2>
+      <button class="btn btn-primary" @click="adding = true">Добавить платёж</button>
       <select v-model="filter" aria-label="Фильтр по категории" @change="offset = 0">
         <option value="">Все категории</option>
         <option v-for="c in categories" :key="c.code" :value="c.code">{{ c.label }}</option>
       </select>
     </header>
+    <StatementUpload :company-id="route.params.id as string" @imported="onSaved" />
+    <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="toast" class="toast" role="status">{{ toast }}</p>
+    <p v-if="!ops.length && !error">Платежей пока нет. Добавьте проведённую операцию или загрузите выписку.</p>
     <div class="scroll">
       <table>
         <thead><tr><th>Дата</th><th>Контрагент</th><th>Назначение</th><th class="r">Сумма</th><th>Категория</th></tr></thead>
@@ -44,9 +62,9 @@ async function setCategory(op: Operation, code: string) {
           <tr v-for="op in ops" :key="op.id" :class="{ dim: op.quality !== 'ok' }"
               :title="op.quality === 'duplicate' ? 'Дубль выгрузки — не учитывается' : op.quality === 'after_gap' ? 'После пропуска в выписке' : ''">
             <td class="num">{{ humanDate(op.op_date) }}</td>
-            <td>{{ op.counterparty_name }}</td>
+            <td>{{ op.counterparty_name }}<span v-if="op.source === 'manual'" class="badge badge-manual">Вручную</span></td>
             <td class="purpose" :title="op.purpose">{{ op.purpose }}</td>
-            <td class="r num" :class="op.direction">{{ op.direction === 'in' ? '+' : '−' }}{{ rub(Number(op.amount)) }}</td>
+            <td class="r num" :class="op.direction">{{ op.direction === 'in' ? '+' : '−' }}{{ money(op.amount) }}</td>
             <td>
               <template v-if="editing === op.id">
                 <select :value="op.category" @change="setCategory(op, ($event.target as HTMLSelectElement).value)">
@@ -66,10 +84,11 @@ async function setCategory(op: Operation, code: string) {
       <button class="btn" :disabled="ops.length < 100" @click="offset += 100">Дальше</button>
     </div>
   </section>
+  <AddPaymentModal v-if="adding" :company-id="route.params.id as string" @close="adding = false" @saved="onSaved" />
 </template>
 
 <style scoped>
-.head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+.head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
 .scroll { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--line); }

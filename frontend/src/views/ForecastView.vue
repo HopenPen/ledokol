@@ -10,6 +10,7 @@ import MissedPayments from '../components/MissedPayments.vue'
 import { chance, humanDate, rub, SOURCE_LABEL } from '../format'
 
 const dashboard = inject<Ref<Dashboard | null>>('dashboard')!
+const emptyHistory = inject<Ref<boolean>>('emptyHistory')!
 const reload = inject<() => Promise<void>>('reload')!
 const route = useRoute()
 const modal = ref<{ preset?: string } | null>(null)
@@ -34,8 +35,8 @@ async function onSaved() {
 </script>
 
 <template>
-  <p v-if="!dashboard">Считаем прогноз…</p>
-  <div v-else-if="f" class="layout">
+  <p v-if="!dashboard && !emptyHistory">Считаем прогноз…</p>
+  <div v-else-if="f && dashboard" class="layout">
     <section class="hero" :class="tone">
       <h2 class="answer">{{ f.headline }}</h2>
       <p class="sub num">Сейчас на счёте {{ rub(f.last_balance) }} · данные выписки на {{ humanDate(f.as_of) }}</p>

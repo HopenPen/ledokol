@@ -10,27 +10,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.logging import RedactingFilter, redact
-from app.core.security import hash_password
-from app.db.models import User
-from app.db.session import Base, SessionLocal, engine
 from app.integrations.http import IntegrationError, ResilientClient
-from app.main import create_app
 from tests.conftest import make_company, to_case_csv
-
-
-@pytest.fixture()
-def client():
-    from app.api.routes import auth
-
-    auth._ATTEMPTS.clear()   # лимит попыток входа хранится в памяти процесса — между тестами сбрасываем
-    Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)
-    with SessionLocal() as s:
-        s.add_all([User(login="alice", password_hash=hash_password("pw-alice")),
-                   User(login="bob", password_hash=hash_password("pw-bob"))])
-        s.commit()
-    with TestClient(create_app()) as c:
-        yield c
 
 
 def _login(c: TestClient, login: str) -> dict:

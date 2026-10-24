@@ -1,30 +1,32 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { api, ApiError, type Company } from '../api'
+import { api, type Company } from '../api'
+import StatementUpload from '../components/StatementUpload.vue'
 
 const companies = ref<Company[]>([])
 const loading = ref(true)
 const error = ref('')
-const uploading = ref(false)
+const creating = ref(false)
+const busy = ref(false)
+const name = ref('')
 const router = useRouter()
 
 onMounted(async () => {
   try { companies.value = await api.companies() } catch (e) { error.value = (e as Error).message } finally { loading.value = false }
 })
 
-async function onFile(ev: Event) {
-  const file = (ev.target as HTMLInputElement).files?.[0]
-  if (!file) return
-  uploading.value = true
+async function create() {
+  if (busy.value) return
+  busy.value = true
   error.value = ''
   try {
-    const res = await api.importStatement(file)
-    router.push(`/companies/${res[0].company.id}`)   // загрузил — сразу видишь прогноз
+    const company = await api.createCompany(name.value)
+    router.push(`/companies/${company.id}/operations`)
   } catch (e) {
-    error.value = e instanceof ApiError ? e.message : 'Не удалось загрузить файл'
+    error.value = (e as Error).message
   } finally {
-    uploading.value = false
+    busy.value = false
   }
 }
 </script>
@@ -33,16 +35,18 @@ async function onFile(ev: Event) {
   <main class="page">
     <header class="head">
       <h1>Мои компании</h1>
-      <label class="btn btn-primary">
-        {{ uploading ? 'Загружаем…' : 'Загрузить выписку' }}
-        <input type="file" accept=".csv" hidden @change="onFile" />
-      </label>
+      <button class="btn btn-primary" @click="creating = !creating">Добавить компанию</button>
     </header>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
+    <form v-if="creating" class="card create" @submit.prevent="create">
+      <label class="field">Название компании <input v-model="name" maxlength="200" required autofocus /></label>
+      <button class="btn btn-primary" :disabled="busy">{{ busy ? 'Создаём…' : 'Создать компанию' }}</button>
+    </form>
+    <StatementUpload @imported="(results) => router.push(`/companies/${results[0].company.id}`)" />
     <p v-if="loading">Загружаем…</p>
     <section v-else-if="!companies.length" class="card empty">
       <h2>Пока нет ни одной компании</h2>
-      <p>Загрузите выписку из банка в формате CSV — прогноз появится сразу, ничего настраивать не нужно.</p>
+      <p>Создайте компанию для ручного ввода платежей или загрузите банковскую выписку — компания появится автоматически.</p>
     </section>
     <ul v-else class="grid">
       <li v-for="c in companies" :key="c.id">
@@ -63,4 +67,5 @@ async function onFile(ev: Event) {
 .company:hover { border-color: var(--green); }
 .muted { color: var(--muted); font-size: 14px; }
 .empty p { color: var(--ink-2); }
+.create { margin-bottom: 20px; max-width: 420px; }
 </style>

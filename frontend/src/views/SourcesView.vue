@@ -1,24 +1,31 @@
 <script setup lang="ts">
 // «Откуда приложение знает о ваших деньгах»: выписка, 1С, ФНС, налоги, ручные события, настройки.
-import { inject, onMounted, ref, type Ref } from 'vue'
+import { inject, onMounted, ref, watch, type Ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { api, ApiError, type Dashboard, type EventRow } from '../api'
+import { api, ApiError, type Company, type Dashboard, type EventRow } from '../api'
+import StatementUpload from '../components/StatementUpload.vue'
+import AddEventModal from '../components/AddEventModal.vue'
 import { humanDate, rub } from '../format'
 
 const route = useRoute()
 const id = route.params.id as string
 const dashboard = inject<Ref<Dashboard | null>>('dashboard')!
+const company = inject<Ref<Company | null>>('company')!
 const reload = inject<() => Promise<void>>('reload')!
 const events = ref<EventRow[]>([])
 const msg = ref<Record<string, string>>({})
 const risky = ref<{ inn: string; status: string; has_tax_debt: boolean }[]>([])
 const settings = ref({ name: '', industry: '', tax_regime: 'unknown', min_balance: '0' })
+const addingEvent = ref(false)
+const today = new Intl.DateTimeFormat('sv-SE').format(new Date())
 
-onMounted(async () => {
+async function loadEvents() {
   events.value = (await api.events(id)).filter((e) => e.source === 'manual' && e.status === 'expected')
-  const c = dashboard.value?.company
+}
+onMounted(loadEvents)
+watch(company, (c) => {
   if (c) settings.value = { name: c.name, industry: c.industry ?? '', tax_regime: c.tax_regime, min_balance: c.min_balance }
-})
+}, { immediate: true })
 
 async function run(key: string, fn: () => Promise<string>) {
   msg.value[key] = 'Выполняем…'
@@ -40,9 +47,9 @@ async function removeEvent(e: EventRow) {
   events.value = events.value.filter((x) => x.id !== e.id)
   await reload()
 }
-async function onFile(ev: Event) {
-  const file = (ev.target as HTMLInputElement).files?.[0]
-  if (file) run('statement', async () => { await api.uploadStatement(id, file); return 'Выписка загружена' })
+async function eventSaved() {
+  addingEvent.value = false
+  await Promise.all([loadEvents(), reload()])
 }
 </script>
 
@@ -52,8 +59,7 @@ async function onFile(ev: Event) {
       <h2>Банковская выписка</h2>
       <p v-if="dashboard" class="muted">Данные по {{ humanDate(dashboard.forecast.as_of) }}</p>
       <p v-for="w in dashboard?.forecast.warnings ?? []" :key="w" class="warn">{{ w }}</p>
-      <label class="btn">Загрузить выписку<input type="file" accept=".csv" hidden @change="onFile" /></label>
-      <p class="msg">{{ msg.statement }}</p>
+      <StatementUpload :company-id="id" @imported="reload" />
     </section>
 
     <section class="card">
@@ -73,6 +79,7 @@ async function onFile(ev: Event) {
 
     <section class="card">
       <h2>Ваши события</h2>
+      <button class="btn" @click="addingEvent = true">Добавить ожидаемый платёж</button>
       <p v-if="!events.length" class="muted">Вы пока ничего не добавляли вручную.</p>
       <ul class="events">
         <li v-for="e in events" :key="e.id">
@@ -99,6 +106,7 @@ async function onFile(ev: Event) {
       <p class="msg">{{ msg.settings }}</p>
     </form>
   </div>
+  <AddEventModal v-if="addingEvent" :company-id="id" :min-date="dashboard?.forecast.as_of ?? today" @close="addingEvent = false" @saved="eventSaved" />
 </template>
 
 <style scoped>

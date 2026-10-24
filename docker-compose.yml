@@ -3,23 +3,43 @@
 services:
   api:
     build: ./backend
-    env_file: ./backend/.env
+    env_file: [./backend/mailpit.env, ./backend/.env]
     environment:
       CASHFLOW_DATABASE_URL: postgresql+psycopg://cashflow:cashflow@db:5432/cashflow
       CASHFLOW_ONEC_BASE_URL: http://onec:8101
       CASHFLOW_FNS_BASE_URL: http://fns:8102
     ports: ["8000:8000"]
-    depends_on: [db, onec, fns]
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
+    depends_on:
+      db: { condition: service_healthy }
+      onec: { condition: service_started }
+      fns: { condition: service_started }
+      mailpit: { condition: service_started }
 
   web:
     build: ./frontend
     ports: ["5173:80"]
-    depends_on: [api]
+    depends_on:
+      api: { condition: service_healthy }
+
+  mailpit:
+    image: axllent/mailpit:v1.27.4
+    ports: ["127.0.0.1:8025:8025", "127.0.0.1:1025:1025"]
 
   db:
     image: postgres:16-alpine
     environment: { POSTGRES_USER: cashflow, POSTGRES_PASSWORD: cashflow, POSTGRES_DB: cashflow }
     volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cashflow -d cashflow"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
   onec:
     build: ./mocks

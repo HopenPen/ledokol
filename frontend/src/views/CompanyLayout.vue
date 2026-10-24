@@ -3,24 +3,32 @@
 // после любого действия (событие, выписка, категория) вкладка вызывает reload().
 import { provide, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { api, ApiError, type Dashboard } from '../api'
+import { api, ApiError, type Company, type Dashboard } from '../api'
 import AssistantPanel from '../components/AssistantPanel.vue'
 
 const route = useRoute()
 const dashboard = ref<Dashboard | null>(null)
+const company = ref<Company | null>(null)
+const emptyHistory = ref(false)
 const error = ref('')
 const assistantOpen = ref(false)
 
 async function reload() {
   error.value = ''
+  dashboard.value = null
+  emptyHistory.value = false
   try {
+    company.value = await api.company(route.params.id as string)
     dashboard.value = await api.dashboard(route.params.id as string)
   } catch (e) {
-    error.value = e instanceof ApiError ? e.message : 'Не удалось загрузить прогноз'
+    if (e instanceof ApiError && e.status === 409) emptyHistory.value = true
+    else error.value = e instanceof ApiError ? e.message : 'Не удалось загрузить прогноз'
   }
 }
 
 provide('dashboard', dashboard)
+provide('company', company)
+provide('emptyHistory', emptyHistory)
 provide('reload', reload)
 watch(() => route.params.id, reload, { immediate: true })
 
@@ -37,7 +45,7 @@ const tabs = [
   <div class="shell">
     <header class="top">
       <RouterLink to="/companies" class="back">← Компании</RouterLink>
-      <h1 v-if="dashboard">{{ dashboard.company.name }}</h1>
+      <h1 v-if="company">{{ company.name }}</h1>
       <nav class="tabs" aria-label="Разделы компании">
         <RouterLink v-for="t in tabs" :key="t.to" :to="`/companies/${route.params.id}/${t.to}`"
                     :class="{ active: route.path.replace(/\/$/, '') === `/companies/${route.params.id}${t.to ? '/' + t.to : ''}` }">
@@ -46,6 +54,9 @@ const tabs = [
       </nav>
     </header>
     <p v-if="error" class="error page" role="alert">{{ error }}</p>
+    <p v-if="emptyHistory" class="empty">Для прогноза нужна история платежей.
+      <RouterLink :to="`/companies/${route.params.id}/operations`">Добавьте платёж или загрузите выписку</RouterLink>.
+    </p>
     <main class="page"><RouterView /></main>
     <button class="ask btn btn-primary" @click="assistantOpen = true">Спросить</button>
     <AssistantPanel v-if="assistantOpen" :company-id="route.params.id as string" @close="assistantOpen = false" />
@@ -54,6 +65,7 @@ const tabs = [
 
 <style scoped>
 .top { background: var(--surface); border-bottom: 1px solid var(--line); padding: 12px 16px 0; }
+.empty { max-width: 1180px; margin: 20px auto 0; padding: 0 16px; color: var(--ink-2); }
 .back { color: var(--ink-2); text-decoration: none; font-size: 14px; }
 h1 { font-size: 20px; margin: 4px 0 8px; }
 .tabs { display: flex; gap: 4px; overflow-x: auto; }

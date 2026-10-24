@@ -3,13 +3,24 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, UploadFile, status
 from sqlalchemy import select
+from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, DbSession, OwnedCompany
 from app.api.schemas import (
-    AlertOut, ClientOut, CompanyOut, CompanyPatch, DashboardOut, EventOut, ForecastOut, HistoryPoint, ImportOut,
+    AlertOut,
+    ClientOut,
+    CompanyCreate,
+    CompanyOut,
+    CompanyPatch,
+    DashboardOut,
+    EventOut,
+    ForecastOut,
+    HistoryPoint,
+    ImportOut,
     QualityOut,
 )
 from app.core.config import get_settings
+from app.core.ids import uuid7
 from app.db.models import Company
 from app.db.models import PlannedEvent as PlannedEventRow
 from app.domain.forecast import MODEL_VERSION
@@ -41,11 +52,20 @@ def list_companies(session: DbSession, user: CurrentUser) -> list[Company]:
     return list(session.scalars(select(Company).where(Company.owner_id == user.id).order_by(Company.external_id)))
 
 
+@router.post("", response_model=CompanyOut, status_code=status.HTTP_201_CREATED)
+def create_company(body: CompanyCreate, session: DbSession, user: CurrentUser) -> Company:
+    company = Company(owner_id=user.id, external_id="manual:" + uuid7().replace("-", "")[:24], name=body.name)
+    session.add(company)
+    session.commit()
+    return company
+
+
 @router.post("/import", response_model=list[ImportOut], status_code=status.HTTP_201_CREATED)
 async def import_new(file: UploadFile, session: DbSession, user: CurrentUser) -> list[ImportOut]:
     """Загрузил выписку → компания создана → прогноз готов. Ноль настройки (TOE: снимаем барьер сложности)."""
     try:
-        return _import_out(import_statement(session, user, await _read_upload(file)))
+        raw = await _read_upload(file)
+        return _import_out(await run_in_threadpool(import_statement, session, user, raw, filename=file.filename or "statement.csv"))
     except StatementFormatError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
 
@@ -54,7 +74,8 @@ async def import_new(file: UploadFile, session: DbSession, user: CurrentUser) ->
 async def upload_statement(company: OwnedCompany, file: UploadFile, session: DbSession, user: CurrentUser) -> list[ImportOut]:
     """Дозагрузка выписки (например, за прошедшую неделю) — новые операции добавятся, старые не задвоятся."""
     try:
-        return _import_out(import_statement(session, user, await _read_upload(file), company))
+        raw = await _read_upload(file)
+        return _import_out(await run_in_threadpool(import_statement, session, user, raw, company, file.filename or "statement.csv"))
     except StatementFormatError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
 
@@ -77,7 +98,7 @@ def dashboard(company: OwnedCompany, session: DbSession) -> DashboardOut:
     try:
         result, cm = run_forecast(session, company)
     except LookupError:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Сначала загрузите выписку") from None
+        raise HTTPException(status.HTTP_409_CONFLICT, "Добавьте платёж или загрузите выписку") from None
     hist = cm.prep.panel.tail(_HISTORY_DAYS)
     return DashboardOut(
         company=CompanyOut.model_validate(company), forecast=ForecastOut.of(result),
@@ -96,7 +117,7 @@ def get_forecast(company: OwnedCompany, session: DbSession, horizon: int = 30) -
     try:
         result, _ = run_forecast(session, company, horizon=horizon)
     except LookupError:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Сначала загрузите выписку") from None
+        raise HTTPException(status.HTTP_409_CONFLICT, "Добавьте платёж или загрузите выписку") from None
     return ForecastOut.of(result)
 
 

@@ -46,7 +46,7 @@ def read_statement(raw: bytes | str | io.IOBase) -> pd.DataFrame:
     src = io.BytesIO(raw) if isinstance(raw, bytes) else raw
     try:
         df = pd.read_csv(src, sep=";", encoding="utf-8-sig", dtype=str, keep_default_na=False)
-    except (UnicodeDecodeError, pd.errors.ParserError) as exc:
+    except (UnicodeDecodeError, pd.errors.ParserError, pd.errors.EmptyDataError) as exc:
         raise StatementFormatError("Не удалось прочитать файл: ожидается CSV в UTF-8 с разделителем «;»") from exc
     missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
     if missing:

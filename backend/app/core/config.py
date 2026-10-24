@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import SecretStr, model_validator
+from pydantic import AnyHttpUrl, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _DEV_SECRET = "dev-only-change-me-0123456789abcdef"
@@ -20,6 +20,15 @@ class Settings(BaseSettings):
     jwt_ttl_minutes: int = 60
     cors_origins: list[str] = ["http://localhost:5173"]
     max_upload_mb: int = 50
+
+    public_app_url: AnyHttpUrl = AnyHttpUrl("http://localhost:5173")
+    verification_ttl_minutes: int = Field(default=60, ge=1, le=1440)
+    smtp_host: str | None = None
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_security: Literal["starttls", "ssl", "none"] = "starttls"
+    smtp_user: str | None = None
+    smtp_password: SecretStr | None = None
+    smtp_from: str = "no-reply@example.invalid"
 
     forecast_horizon: int = 30
     forecast_sims: int = 1000
@@ -44,6 +53,8 @@ class Settings(BaseSettings):
     def _prod_guards(self) -> Settings:
         if self.env == "prod" and self.jwt_secret.get_secret_value() == _DEV_SECRET:
             raise ValueError("CASHFLOW_JWT_SECRET must be set in prod")
+        if self.env == "prod" and self.smtp_host and (self.smtp_security == "none" or self.public_app_url.scheme != "https"):
+            raise ValueError("Production email verification requires HTTPS and encrypted SMTP")
         if self.llm_provider == "openai" and not (self.llm_api_key and self.llm_model):
             raise ValueError("CASHFLOW_LLM_API_KEY and CASHFLOW_LLM_MODEL are required when CASHFLOW_LLM_PROVIDER=openai")
         return self

@@ -224,6 +224,9 @@ node_modules/
 frontend/dist/
 *.tsbuildinfo
 *.db
+*.db-journal
+*.db-wal
+*.db-shm
 backend/demo/
 backend/models/
 .out/

@@ -6,7 +6,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.domain.types import ForecastResult, GapAlert, PlannedEvent
 
@@ -17,8 +17,27 @@ class _In(BaseModel):
 
 # --- auth -----------------------------------------------------------------------------------------------------
 class LoginIn(_In):
-    login: str = Field(min_length=1, max_length=64)
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=False)
+    login: str = Field(min_length=1, max_length=254)
     password: str = Field(min_length=1, max_length=256)
+
+
+class RegisterIn(_In):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=False)
+    email: EmailStr = Field(max_length=254)
+    password: str = Field(min_length=8, max_length=256)
+
+
+class ResendVerificationIn(_In):
+    email: EmailStr = Field(max_length=254)
+
+
+class VerifyEmailIn(_In):
+    token: str = Field(min_length=43, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+class AuthMessage(BaseModel):
+    message: str
 
 
 class TokenOut(BaseModel):
@@ -42,6 +61,10 @@ class CompanyPatch(_In):
     industry: str | None = Field(default=None, max_length=100)
     tax_regime: Literal["unknown", "usn", "osno", "eskhn"] | None = None
     min_balance: Decimal | None = Field(default=None, ge=0, max_digits=16, decimal_places=2)
+
+
+class CompanyCreate(_In):
+    name: str = Field(min_length=1, max_length=200)
 
 
 class QualityOut(BaseModel):
@@ -75,6 +98,26 @@ class OperationOut(BaseModel):
     category_label: str
     category_source: str
     quality: str
+    counterparty_inn: str | None
+    balance_eod: Decimal
+    source: Literal["manual", "statement"]
+
+
+class PaymentIn(_In):
+    op_date: date
+    amount: Decimal = Field(gt=0, max_digits=16, decimal_places=2)
+    direction: Literal["in", "out"]
+    counterparty_name: str = Field(min_length=1, max_length=300)
+    counterparty_inn: str = Field(default="", pattern=r"^(?:\d{10}|\d{12})?$")
+    purpose: str = Field(min_length=1, max_length=2000)
+    balance_eod: Decimal = Field(max_digits=16, decimal_places=2)
+
+    @field_validator("op_date")
+    @classmethod
+    def actual_date(cls, value: date) -> date:
+        if value > date.today():
+            raise ValueError("Проведённый платёж не может быть в будущем; добавьте ожидаемое событие")
+        return value
 
 
 class CategoryPatch(_In):

@@ -23,7 +23,9 @@ export interface Dashboard {
 export interface DayCompare { date: string; plan: number; low: number; high: number; fact: number; deviation: number; flagged: boolean }
 export interface DailyPlanFact { run: { id: string; as_of: string; model_version: string } | null; rows: DayCompare[]; flagged_days: number }
 export interface EventRow { id: string; event_date: string; amount: string; direction: string; kind: string; source: string; title: string; confidence: string; status: string }
-export interface Operation { id: string; op_date: string; amount: string; direction: string; counterparty_name: string; purpose: string; category: string; category_label: string; category_source: string; quality: string }
+export interface Operation { id: string; op_date: string; amount: string; direction: string; counterparty_name: string; purpose: string; category: string; category_label: string; category_source: string; quality: string; counterparty_inn: string | null; balance_eod: string; source: 'manual' | 'statement' }
+export interface ImportResult { company: Company; rows_total: number; rows_new: number; already_imported: boolean; quality: { warnings: string[] } }
+export interface PaymentInput { op_date: string; amount: string; direction: 'in' | 'out'; counterparty_name: string; counterparty_inn: string; purpose: string; balance_eod: string }
 export interface PlanFactRow { event_id: string | null; title: string; planned_date: string; planned_amount: number; status: string; actual_amount: number; actual_date: string | null }
 export interface ScenarioResult { base: Forecast; scenario: Forecast; delta: { base_first_gap: string | null; scenario_first_gap: string | null; base_min_p50: number; scenario_min_p50: number; extra_shortfall: number } }
 
@@ -55,19 +57,28 @@ async function request<T>(method: string, path: string, body?: unknown, headers:
   if (resp.status === 401) logout()
   if (!resp.ok) {
     const detail = await resp.json().catch(() => ({}))
-    throw new ApiError(resp.status, typeof detail.detail === 'string' ? detail.detail : 'Не удалось выполнить запрос')
+    const message = typeof detail.detail === 'string' ? detail.detail : Array.isArray(detail.detail)
+      ? detail.detail.map((e: { loc?: string[]; msg: string }) => `${e.loc?.slice(1).join('.')}: ${e.msg}`).join('; ')
+      : 'Не удалось выполнить запрос'
+    throw new ApiError(resp.status, message)
   }
   return resp.status === 204 ? (undefined as T) : resp.json()
 }
 
 export const api = {
+  register: (email: string, password: string) => request<{ message: string }>('POST', '/api/auth/register', { email, password }),
+  resendVerification: (email: string) => request<{ message: string }>('POST', '/api/auth/resend-verification', { email }),
+  verifyEmail: (token: string) => request<{ message: string }>('POST', '/api/auth/verify-email', { token }),
   async login(login: string, password: string) {
     const r = await request<{ access_token: string }>('POST', '/api/auth/login', { login, password })
     setToken(r.access_token)
   },
   companies: () => request<Company[]>('GET', '/api/companies'),
-  importStatement: (file: File) => { const f = new FormData(); f.append('file', file); return request<{ company: Company; rows_new: number }[]>('POST', '/api/companies/import', f) },
-  uploadStatement: (id: string, file: File) => { const f = new FormData(); f.append('file', file); return request('POST', `/api/companies/${id}/statements`, f) },
+  createCompany: (name: string) => request<Company>('POST', '/api/companies', { name }),
+  company: (id: string) => request<Company>('GET', `/api/companies/${id}`),
+  addPayment: (id: string, body: PaymentInput, key: string) => request<Operation>('POST', `/api/companies/${id}/operations`, body, { 'Idempotency-Key': key }),
+  importStatement: (file: File) => { const f = new FormData(); f.append('file', file); return request<ImportResult[]>('POST', '/api/companies/import', f) },
+  uploadStatement: (id: string, file: File) => { const f = new FormData(); f.append('file', file); return request<ImportResult[]>('POST', `/api/companies/${id}/statements`, f) },
   dashboard: (id: string) => request<Dashboard>('GET', `/api/companies/${id}/dashboard`),
   forecast: (id: string, horizon: number) => request<Forecast>('GET', `/api/companies/${id}/forecast?horizon=${horizon}`),
   patchCompany: (id: string, body: Partial<{ name: string; industry: string; tax_regime: string; min_balance: string }>) => request<Company>('PATCH', `/api/companies/${id}`, body),

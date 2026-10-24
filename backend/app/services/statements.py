@@ -1,32 +1,17 @@
-"""Загрузка выписки в БД.
-
-Идемпотентность (что будет, если загрузить дважды?):
-- тот же файл целиком → находим по sha256 и ничего не делаем;
-- файл с частично новыми строками (дозагрузка за неделю) → вставляем только новые operation_id.
-После вставки заново размечаем качество и категории по всей истории компании: дубль определяется сверкой
-с остатком, а для этого нужны соседние дни. Категории, которые пользователь поправил руками, не трогаем.
-"""
+"""Загрузка выписки: адаптер → привязка счёта → операции → общая обработка истории."""
 from __future__ import annotations
 
 import hashlib
-import logging
 from dataclasses import dataclass
 from decimal import Decimal
 
-import pandas as pd
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.db.models import Company, Operation, StatementImport, User
-from app.db.models import PlannedEvent as PlannedEventRow
-from app.domain.ingest import QualityReport, read_statement
-from app.domain.pipeline import prepare_company
-from app.domain.planfact import match_events
-from app.services.events_mapping import to_domain_event
-from app.services.company_data import load_operations_frame
-from app.services.classifier import get_classifier
-
-log = logging.getLogger("cashflow.statements")
+from app.db.models import BankAccount, Company, Operation, StatementImport, User
+from app.domain.ingest import QualityReport, StatementFormatError
+from app.importers import ParsedImport, parse_statement
+from app.services.history import refresh_history
 
 
 @dataclass(slots=True)
@@ -38,82 +23,70 @@ class ImportResult:
     quality: QualityReport
 
 
-def import_statement(session: Session, user: User, raw: bytes, company: Company | None = None) -> list[ImportResult]:
-    """Если company не задана — создаём компании по company_id из файла (сценарий «загрузил выписку → сразу прогноз»)."""
-    digest = hashlib.sha256(raw).hexdigest()
-    df = read_statement(raw)
-    results: list[ImportResult] = []
-    for external_id, part in df.groupby("company_id", sort=True):
-        target = company if company is not None else _get_or_create_company(session, user, str(external_id), part)
-        if company is not None and str(external_id) != company.external_id:
-            continue  # в общий файл могут попасть чужие компании — берём только свою
-        if session.scalar(select(StatementImport).where(StatementImport.company_id == target.id,
-                                                        StatementImport.sha256 == digest)):
-            results.append(ImportResult(target, len(part), 0, True, QualityReport(rows_total=len(part))))
-            continue
-        rows_new = _insert_new_operations(session, target, part)
-        session.add(StatementImport(company_id=target.id, sha256=digest, rows_total=len(part), rows_new=rows_new))
-        quality = _relabel(session, target)
-        target.data_version += 1
-        results.append(ImportResult(target, len(part), rows_new, False, quality))
-        log.info("statement_imported", extra={"company_id": target.id, "rows": rows_new})
-    session.commit()
-    return results
+def import_statement(session: Session, user: User, raw: bytes, company: Company | None = None,
+                     filename: str = "statement.csv") -> list[ImportResult]:
+    parsed = parse_statement(raw, filename)
+    digest, results = hashlib.sha256(raw).hexdigest(), []
+    try:
+        for external, part in parsed.frame.groupby("company_id", sort=True):
+            external = str(external)
+            if company is not None and external not in parsed.accounts and external != company.external_id:
+                if company.external_id.startswith("manual:") and parsed.frame["company_id"].nunique() == 1:
+                    if not 1 <= len(external) <= 32 or session.scalar(select(Company).where(
+                            Company.owner_id == user.id, Company.external_id == external)):
+                        raise StatementFormatError("Компания из CSV уже существует или имеет некорректный идентификатор")
+                    company.external_id = external
+                else:
+                    continue
+            target = _target(session, user, external, parsed, company)
+            journal = session.scalar(select(StatementImport).where(StatementImport.company_id == target.id,
+                                                                   StatementImport.sha256 == digest))
+            if journal:
+                results.append(ImportResult(target, len(part), 0, True, QualityReport(rows_total=len(part))))
+                continue
+            existing = set(session.scalars(select(Operation.source_operation_id).where(Operation.company_id == target.id)))
+            fresh = part[~part["operation_id"].isin(existing)].drop_duplicates("operation_id")
+            for day, day_rows in fresh.groupby("operation_date"):
+                session.execute(update(Operation).where(Operation.company_id == target.id, Operation.op_date == day.date())
+                                .values(balance_eod=Decimal(str(day_rows.iloc[0]["balance_eod"]))))
+            session.add_all([Operation(
+                company_id=target.id, source_operation_id=r.operation_id, op_date=r.operation_date.date(),
+                amount=Decimal(str(r.amount)), direction=r.direction, counterparty_inn=r.counterparty_inn or None,
+                counterparty_name=r.counterparty_name, purpose=r.payment_purpose, balance_eod=Decimal(str(r.balance_eod)))
+                for r in fresh.itertuples(index=False)])
+            session.flush()
+            quality = refresh_history(session, target)
+            session.add(StatementImport(company_id=target.id, sha256=digest, rows_total=len(part), rows_new=len(fresh)))
+            session.execute(update(Company).where(Company.id == target.id).values(data_version=Company.data_version + 1))
+            results.append(ImportResult(target, len(part), len(fresh), False, quality))
+        if not results:
+            raise StatementFormatError("В файле нет платежей выбранной компании")
+        session.commit()
+        return results
+    except Exception:
+        session.rollback()
+        raise
 
 
-def _get_or_create_company(session: Session, user: User, external_id: str, part: pd.DataFrame) -> Company:
-    found = session.scalar(select(Company).where(Company.owner_id == user.id, Company.external_id == external_id))
-    if found:
-        return found
-    company = Company(owner_id=user.id, external_id=external_id, name=f"Компания {external_id}")
-    session.add(company)
-    session.flush()
-    return company
-
-
-def _insert_new_operations(session: Session, company: Company, part: pd.DataFrame) -> int:
-    existing = set(session.scalars(select(Operation.source_operation_id).where(Operation.company_id == company.id)))
-    fresh = part[~part["operation_id"].isin(existing)]
-    session.add_all([
-        Operation(
-            company_id=company.id, source_operation_id=r.operation_id, op_date=r.operation_date.date(),
-            amount=Decimal(str(r.amount)), direction=r.direction,
-            counterparty_inn=r.counterparty_inn or None, counterparty_name=r.counterparty_name,
-            purpose=r.payment_purpose, balance_eod=Decimal(str(r.balance_eod)),
-        )
-        for r in fresh.itertuples(index=False)
-    ])
-    session.flush()
-    return len(fresh)
-
-
-def _relabel(session: Session, company: Company) -> QualityReport:
-    frame, rows = load_operations_frame(session, company, with_rows=True)
-    prep = prepare_company(frame, get_classifier())
-    by_source = prep.ops.set_index("operation_id")
-    for op in rows:
-        lab = by_source.loc[op.source_operation_id]
-        op.quality = lab["quality"]
-        if op.category_source != "user":   # ручную правку пользователя модель не перетирает
-            op.category, op.category_source, op.confidence = lab["category"], lab["category_source"], float(lab["confidence"])
-    _reconcile_events(session, company, prep)
-    return prep.quality
-
-
-def _reconcile_events(session: Session, company: Company, prep) -> None:
-    """План-факт при поступлении факта: ожидаемые события, срок которых наступил, сверяем с новой выпиской.
-
-    Пришло → «received», пришло частично → «partial», срок прошёл и денег нет → «missed». Missed-события
-    показываются на главном экране предупреждением, а в прогноз они уже не входят — он пересчитается сам.
-    """
-    as_of = prep.panel["date"].iloc[-1].date()
-    due = list(session.scalars(select(PlannedEventRow).where(
-        # «missed» тоже перепроверяем: деньги могли прийти позже, тогда платёж закроется как пришедший.
-        PlannedEventRow.company_id == company.id, PlannedEventRow.status.in_(["expected", "missed"]),
-        PlannedEventRow.event_date <= as_of)))
-    if not due:
-        return
-    by_id = {e.id: e for e in due}
-    for m in match_events([to_domain_event(e) for e in due], prep.ops, as_of):
-        if m.status != "pending":
-            by_id[m.event.ref].status = m.status
+def _target(session: Session, user: User, external: str, parsed: ParsedImport, selected: Company | None) -> Company:
+    account = parsed.accounts.get(external)
+    binding = session.scalar(select(BankAccount).where(BankAccount.owner_id == user.id, BankAccount.number == account)) if account else None
+    if binding and selected and binding.company_id != selected.id:
+        raise StatementFormatError("Этот банковский счёт уже связан с другой компанией")
+    target = selected or (session.get(Company, binding.company_id) if binding else None)
+    if target is None:
+        if not 1 <= len(external) <= 32:
+            raise StatementFormatError("Идентификатор компании должен содержать от 1 до 32 символов")
+        target = session.scalar(select(Company).where(Company.owner_id == user.id, Company.external_id == external))
+    if target is None:
+        target = Company(owner_id=user.id, external_id=external, name=parsed.names.get(external) or f"Компания {external}")
+        session.add(target)
+        session.flush()
+    if account:
+        current = session.get(BankAccount, target.id)
+        if current and current.number != account:
+            raise StatementFormatError("Для компании уже выбран другой счёт; создайте отдельную компанию для второго счёта")
+        if current is None:
+            session.add(BankAccount(company_id=target.id, owner_id=user.id, number=account))
+            session.flush()
+    return target

@@ -9,7 +9,18 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
-    CheckConstraint, Date, DateTime, Enum, Float, ForeignKey, Index, Numeric, String, Text, UniqueConstraint, func,
+    CheckConstraint,
+    Date,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -27,6 +38,19 @@ class User(Base):
     login: Mapped[str] = mapped_column(String(64), unique=True)
     password_hash: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class UserEmail(Base):
+    """Отдельная идентичность сохраняет совместимость с существующими логинами."""
+    __tablename__ = "user_emails"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    email: Mapped[str] = mapped_column(String(254))
+    email_key: Mapped[str] = mapped_column(String(254), unique=True)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    token_hash: Mapped[str | None] = mapped_column(String(64), unique=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class Company(Base):
@@ -65,6 +89,24 @@ class StatementImport(Base):
     rows_total: Mapped[int]
     rows_new: Mapped[int]
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class BankAccount(Base):
+    __tablename__ = "bank_accounts"
+    __table_args__ = (UniqueConstraint("owner_id", "number", name="uq_owner_bank_account"),)
+
+    company_id: Mapped[str] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    number: Mapped[str] = mapped_column(String(20))
+
+
+class ManualPaymentRequest(Base):
+    __tablename__ = "manual_payment_requests"
+
+    company_id: Mapped[str] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), primary_key=True)
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    request_hash: Mapped[str] = mapped_column(String(64))
+    operation_id: Mapped[str] = mapped_column(ForeignKey("operations.id", ondelete="CASCADE"), unique=True)
 
 
 class Operation(Base):

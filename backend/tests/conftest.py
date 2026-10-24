@@ -14,7 +14,7 @@ os.environ.setdefault("CASHFLOW_ENV", "test")
 os.environ.setdefault("CASHFLOW_DATABASE_URL", "sqlite:///./test_cashflow.db")
 os.environ.setdefault("CASHFLOW_JWT_SECRET", "test-secret-test-secret-test-secret-123")
 
-from app.domain.calendar import is_working_day, next_working_day  # noqa: E402
+from app.domain.calendar import is_working_day, next_working_day
 
 PURPOSES = {
     "acq": "Зачисление средств по операциям эквайринга. Мерчант №123. Сумма операций {a}",
@@ -83,3 +83,24 @@ def to_case_csv(df: pd.DataFrame) -> bytes:
 @pytest.fixture
 def company_ops() -> pd.DataFrame:
     return make_company()
+
+
+@pytest.fixture
+def client():
+    from fastapi.testclient import TestClient
+
+    from app.api.routes import auth
+    from app.core.security import hash_password
+    from app.db.models import User
+    from app.db.session import Base, SessionLocal, engine
+    from app.main import create_app
+
+    auth._ATTEMPTS.clear()
+    Base.metadata.drop_all(engine)
+    Base.metadata.create_all(engine)
+    with SessionLocal() as session:
+        session.add_all([User(login="alice", password_hash=hash_password("pw-alice")),
+                         User(login="bob", password_hash=hash_password("pw-bob"))])
+        session.commit()
+    with TestClient(create_app()) as test_client:
+        yield test_client

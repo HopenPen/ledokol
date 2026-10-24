@@ -1,13 +1,15 @@
 """Операции с категориями и ручная правка категории (FR-2.3)."""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Header, HTTPException, Query, Response, status
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession, OwnedCompany
-from app.api.schemas import CategoryPatch, OperationOut
+from app.api.schemas import CategoryPatch, OperationOut, PaymentIn
 from app.db.models import Company, Operation
 from app.domain.categories import CATEGORIES, label
+from app.services.events import IdempotencyConflict
+from app.services.payments import NewPayment, create_payment
 
 router = APIRouter(tags=["operations"])
 
@@ -15,7 +17,21 @@ router = APIRouter(tags=["operations"])
 def _out(op: Operation) -> OperationOut:
     return OperationOut(id=op.id, op_date=op.op_date, amount=op.amount, direction=op.direction,
                         counterparty_name=op.counterparty_name, purpose=op.purpose, category=op.category,
-                        category_label=label(op.category), category_source=op.category_source, quality=op.quality)
+                        category_label=label(op.category), category_source=op.category_source, quality=op.quality,
+                        counterparty_inn=op.counterparty_inn, balance_eod=op.balance_eod,
+                        source="manual" if op.source_operation_id.startswith("manual:") else "statement")
+
+
+@router.post("/companies/{company_id}/operations", response_model=OperationOut, status_code=status.HTTP_201_CREATED)
+def add_payment(company: OwnedCompany, body: PaymentIn, session: DbSession, response: Response,
+                idempotency_key: str | None = Header(default=None, min_length=1, max_length=64)) -> OperationOut:
+    try:
+        operation, created = create_payment(session, company, NewPayment(**body.model_dump()), idempotency_key)
+    except IdempotencyConflict:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Этот ключ уже использован с другими данными платежа") from None
+    if not created:
+        response.status_code = status.HTTP_200_OK
+    return _out(operation)
 
 
 @router.get("/companies/{company_id}/operations", response_model=list[OperationOut])
