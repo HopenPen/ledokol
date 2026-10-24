@@ -15,11 +15,15 @@ archive=$(mktemp "$root/releases/.archive.XXXXXXXX")
 trap 'rm -f -- "$archive"; if [[ -n ${incoming:-} ]]; then rm -rf -- "$incoming"; fi' EXIT
 cat >"$archive"
 python3 - "$archive" "$incoming" <<'PY'
-import sys, tarfile
+import os, sys, tarfile
 with tarfile.open(sys.argv[1], 'r:gz') as archive:
     if any(member.name.split('/')[0] not in {'backend', 'frontend', 'mocks', 'deploy'} for member in archive):
         raise SystemExit('Unexpected archive contents')
     archive.extractall(sys.argv[2], filter='data')
+# data-фильтр tarfile оставляет права каталогов текущему umask (здесь 077).
+# Исходники копируются в Docker image и должны читаться его непривилегированным пользователем.
+for directory, _, _ in os.walk(sys.argv[2]):
+    os.chmod(directory, 0o755)
 PY
 [[ -f "$incoming/deploy/compose.yml" && -f "$incoming/backend/uv.lock" ]] || { echo 'Incomplete release' >&2; exit 1; }
 if [[ -d $release ]]; then
