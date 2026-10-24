@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import AnyHttpUrl, Field, SecretStr, model_validator
+from pydantic import AnyHttpUrl, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _DEV_SECRET = "dev-only-change-me-0123456789abcdef"
@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     max_upload_mb: int = 50
 
     public_app_url: AnyHttpUrl = AnyHttpUrl("http://localhost:5173")
+    require_email_verification: bool = True
     verification_ttl_minutes: int = Field(default=60, ge=1, le=1440)
     smtp_host: str | None = None
     smtp_port: int = Field(default=587, ge=1, le=65535)
@@ -29,6 +30,7 @@ class Settings(BaseSettings):
     smtp_user: str | None = None
     smtp_password: SecretStr | None = None
     smtp_from: str = "no-reply@example.invalid"
+    local_mailbox_url: AnyHttpUrl | None = None
 
     forecast_horizon: int = 30
     forecast_sims: int = 1000
@@ -48,6 +50,11 @@ class Settings(BaseSettings):
     llm_base_url: str | None = None      # None — api.openai.com; иначе свой шлюз / модель в контуре банка
     llm_model: str = ""
     llm_api_key: SecretStr | None = None
+
+    @field_validator("local_mailbox_url", mode="before")
+    @classmethod
+    def _empty_mailbox_url(cls, value):
+        return None if value == "" else value
 
     @model_validator(mode="after")
     def _prod_guards(self) -> Settings:

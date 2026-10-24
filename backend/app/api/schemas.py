@@ -40,6 +40,11 @@ class AuthMessage(BaseModel):
     message: str
 
 
+class RegistrationInfoOut(BaseModel):
+    email_delivery: Literal["disabled", "unavailable", "local", "smtp"]
+    local_mailbox_url: str | None = None
+
+
 class TokenOut(BaseModel):
     access_token: str
     token_type: Literal["bearer"] = "bearer"

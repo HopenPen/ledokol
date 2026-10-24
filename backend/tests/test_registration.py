@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import select
 
 from app.api.routes.auth import verification_mailer
+from app.core.config import get_settings
 from app.db.models import User, UserEmail
 from app.db.session import SessionLocal
 from app.services.registration import EmailDeliveryError
@@ -124,3 +125,48 @@ def test_validation_unknown_email_and_rate_limits(client, mailbox):
     assert signup(client).status_code == 429
     assert client.post("/api/auth/verify-email", json={"token": "x" * 43}).status_code == 400
     assert login(client).status_code == 403  # лимиты действий не мешают друг другу
+
+
+def test_temporary_registration_without_email_keeps_password_and_company_isolation(client, mailbox, monkeypatch):
+    monkeypatch.setattr(get_settings(), "require_email_verification", False)
+    mailbox.fail = True  # SMTP не нужен даже при полной недоступности провайдера.
+    first = signup(client)
+    assert first.status_code == 202 and "временно отключено" in first.json()["message"]
+    assert signup(client, "OWNER@example.com", "attacker-password").json() == first.json()
+    assert mailbox.messages == []
+    assert login(client, password="attacker-password").status_code == 401
+    response = login(client, "OWNER@EXAMPLE.COM")
+    assert response.status_code == 200
+    headers = {"Authorization": "Bearer " + response.json()["access_token"]}
+    assert client.get("/api/companies", headers=headers).json() == []
+    owner_login = client.post("/api/auth/login", json={"login": "alice", "password": "pw-alice"})
+    owner_headers = {"Authorization": "Bearer " + owner_login.json()["access_token"]}
+    created = client.post("/api/companies", json={"name": "Чужая компания"}, headers=owner_headers)
+    assert created.status_code == 201
+    foreign_company = created.json()["id"]
+    with SessionLocal() as session:
+        identity = session.scalar(select(UserEmail))
+        assert identity.verified_at is None and identity.token_hash is None and identity.expires_at is None
+    assert client.get(f"/api/companies/{foreign_company}", headers=headers).status_code == 404
+    assert client.post("/api/auth/resend-verification", json={"email": EMAIL}).json() == first.json()
+    assert mailbox.messages == []
+    monkeypatch.setattr(get_settings(), "require_email_verification", True)
+    assert login(client).status_code == 403
+    mailbox.fail = False
+    assert client.post("/api/auth/resend-verification", json={"email": EMAIL}).status_code == 202
+    assert client.post("/api/auth/verify-email", json={"token": mailbox.token()}).status_code == 200
+    assert login(client).status_code == 200
+
+
+def test_temporary_mode_allows_existing_pending_account_without_changing_verification(client, mailbox, monkeypatch):
+    signup(client)
+    token = mailbox.token()
+    assert login(client).status_code == 403
+    monkeypatch.setattr(get_settings(), "require_email_verification", False)
+    assert login(client).status_code == 200
+    with SessionLocal() as session:
+        identity = session.scalar(select(UserEmail))
+        assert identity.verified_at is None
+        assert identity.token_hash == hashlib.sha256(token.encode()).hexdigest()
+    monkeypatch.setattr(get_settings(), "require_email_verification", True)
+    assert login(client).status_code == 403

@@ -8,7 +8,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.api.deps import DbSession
-from app.api.schemas import AuthMessage, LoginIn, RegisterIn, ResendVerificationIn, TokenOut, VerifyEmailIn
+from app.api.schemas import AuthMessage, LoginIn, RegisterIn, RegistrationInfoOut, ResendVerificationIn, TokenOut, VerifyEmailIn
+from app.core.config import get_settings
 from app.core.security import create_access_token
 from app.integrations.email import SmtpVerificationMailer
 from app.services.registration import (
@@ -27,6 +28,12 @@ _ATTEMPTS: dict[str, deque[float]] = defaultdict(deque)
 _MESSAGE = "Если адресу требуется подтверждение, письмо отправлено. Проверьте входящие и папку «Спам»."
 
 
+def _registration_message() -> str:
+    if not get_settings().require_email_verification:
+        return "Можно войти с указанным email и паролем. Подтверждение почты временно отключено."
+    return _MESSAGE
+
+
 def _rate_limit(request: Request, action: str, limit: int) -> None:
     ip = request.client.host if request.client else "unknown"
     now, queue = time.monotonic(), _ATTEMPTS[f"{action}:{ip}"]
@@ -42,6 +49,20 @@ def verification_mailer() -> VerificationMailer:
 
 
 Mailer = Annotated[VerificationMailer, Depends(verification_mailer)]
+
+
+@router.get("/registration-info", response_model=RegistrationInfoOut)
+def registration_info() -> RegistrationInfoOut:
+    """Только режим доставки, без SMTP-адреса, логина и секретов."""
+    settings = get_settings()
+    if not settings.require_email_verification:
+        return RegistrationInfoOut(email_delivery="disabled")
+    if not settings.smtp_host or settings.smtp_from.endswith("@example.invalid"):
+        return RegistrationInfoOut(email_delivery="unavailable")
+    local_capture = settings.smtp_host in {"mailpit", "localhost", "127.0.0.1", "::1"} and settings.smtp_port == 1025
+    if settings.env != "prod" and local_capture and settings.local_mailbox_url is not None:
+        return RegistrationInfoOut(email_delivery="local", local_mailbox_url=str(settings.local_mailbox_url))
+    return RegistrationInfoOut(email_delivery="smtp")
 
 
 @router.post("/login", response_model=TokenOut)
@@ -63,7 +84,7 @@ def signup(body: RegisterIn, request: Request, session: DbSession, mailer: Maile
         register(session, str(body.email), body.password, mailer)
     except EmailDeliveryError:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Не удалось отправить письмо. Попробуйте позже") from None
-    return AuthMessage(message=_MESSAGE)
+    return AuthMessage(message=_registration_message())
 
 
 @router.post("/resend-verification", response_model=AuthMessage, status_code=status.HTTP_202_ACCEPTED)
@@ -73,7 +94,7 @@ def resend(body: ResendVerificationIn, request: Request, session: DbSession, mai
         resend_verification(session, str(body.email), mailer)
     except EmailDeliveryError:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Не удалось отправить письмо. Попробуйте позже") from None
-    return AuthMessage(message=_MESSAGE)
+    return AuthMessage(message=_registration_message())
 
 
 @router.post("/verify-email", response_model=AuthMessage)
