@@ -24,7 +24,11 @@ def build_context(res: ForecastResult) -> str:
         "as_of": res.as_of.isoformat(),
         "balance_now": _round(res.last_balance),
         "threshold": _round(res.threshold),
-        "headline": res.headline,
+        # UI показывает текущую нехватку до копеек; этот текст не должен обходить округление агрегатов.
+        "headline": ("Последний известный остаток ниже установленного порога."
+                     if res.last_balance < res.threshold else res.headline),
+        "first_recovery_date": next((p.day.isoformat() for p in res.points if p.p50 >= res.threshold), None)
+                               if res.last_balance < res.threshold else None,
         "min_p50": _round(min(p.p50 for p in res.points)) if res.points else None,
         "gaps": [{
             "start": a.start.isoformat(), "end": a.end.isoformat(), "probability": round(a.probability, 2),

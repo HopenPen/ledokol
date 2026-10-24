@@ -121,7 +121,7 @@ def what_if(company: str, revenue_drop_pct: float = 0.0, fixed_cost_increase_pct
                       fixed_cost_increase_pct=args.fixed_cost_increase_pct, client_delays=delays)
         base, _ = run_forecast(s, owned, save=False)
         res, _ = run_forecast(s, owned, scenario=sc, save=False)
-    return json.dumps({"headline": res.headline, "gaps": len(res.alerts),
+    return json.dumps({"headline": json.loads(build_context(res))["headline"], "gaps": len(res.alerts),
                        "before": _gap_summary(base), "after": _gap_summary(res)}, ensure_ascii=False)
 
 

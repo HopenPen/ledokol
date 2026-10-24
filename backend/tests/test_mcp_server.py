@@ -84,8 +84,8 @@ def test_client_delay_uses_anonymous_selected_client_and_compares_gaps(owned, mo
     assert clients == [{"client_ref": server._client_ref(owned["id"], key), "share": .75}]
     assert key not in json.dumps(clients) and name not in json.dumps(clients, ensure_ascii=False)
     calls = []
-    base = ForecastResult(as_of=date(2026, 1, 1), last_balance=100000, threshold=0, points=[], events=[],
-                          alerts=[], headline="Средств достаточно")
+    base = ForecastResult(as_of=date(2026, 1, 1), last_balance=-125.5, threshold=0, points=[], events=[],
+                          alerts=[], headline="Денег уже не хватает: 125,50 ₽")
     negative = deepcopy(base)
     negative.alerts = [GapAlert(start=date(2026, 1, 15), end=date(2026, 1, 16), probability=.753,
                                shortfall=12345.67, worst_case=False, level="вероятно")]
@@ -104,6 +104,7 @@ def test_client_delay_uses_anonymous_selected_client_and_compares_gaps(owned, mo
     assert result["before"] == {"first_gap_date": None, "shortfall": 0, "probability": 0, "gaps": 0}
     assert result["after"] == {"first_gap_date": "2026-01-15", "shortfall": 12000, "probability": .75, "gaps": 1}
     assert name not in json.dumps(result, ensure_ascii=False) and key not in json.dumps(result)
+    assert "125,50" not in result["headline"]
     calls.clear()
     with pytest.raises(ValueError, match="Клиент не найден"):
         server.what_if(owned["external_id"], client_delay_weeks=2, client_ref="0" * 16)
