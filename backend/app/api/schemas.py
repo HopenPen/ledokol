@@ -73,6 +73,7 @@ class CompanyCreate(_In):
 
 
 class QualityOut(BaseModel):
+    rows_rejected: int = 0
     rows_total: int
     duplicates: int
     balance_jumps: int

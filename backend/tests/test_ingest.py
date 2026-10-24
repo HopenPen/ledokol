@@ -46,3 +46,13 @@ def test_gap_with_balance_jump_is_marked(company_ops):
     _, panel, rep = flag_quality(ops)
     assert rep.balance_jumps >= 1
     assert panel["after_gap"].any()
+
+
+def test_twenty_extra_duplicates_are_found_without_changing_daily_balance(company_ops):
+    selected = company_ops[company_ops["direction"].eq("in")].groupby("operation_date").head(1).iloc[1:21].copy()
+    selected["operation_id"] = [f"EXTRA-{i:02}" for i in range(20)]
+    ops = pd.concat([company_ops, selected], ignore_index=True)
+    flagged, panel, report = flag_quality(ops)
+    _, original, _ = flag_quality(company_ops)
+    assert report.duplicates == 20 and flagged["quality"].eq("duplicate").sum() == 20
+    pd.testing.assert_frame_equal(panel, original)
