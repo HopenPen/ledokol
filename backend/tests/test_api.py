@@ -20,6 +20,9 @@ from tests.conftest import make_company, to_case_csv
 
 @pytest.fixture()
 def client():
+    from app.api.routes import auth
+
+    auth._ATTEMPTS.clear()   # лимит попыток входа хранится в памяти процесса — между тестами сбрасываем
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
     with SessionLocal() as s:

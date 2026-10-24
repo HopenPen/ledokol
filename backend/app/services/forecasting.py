@@ -21,12 +21,11 @@ from app.domain.forecast import FittedModel, fit, forecast
 from app.domain.ingest import QualityReport
 from app.domain.pipeline import PreparedCompany, prepare_company
 from app.domain.scenarios import Scenario
-from app.domain.types import CONFIDENCE_PROB, Confidence, Direction, EventSource, ForecastResult, PlannedEvent
+from app.domain.types import ForecastResult, PlannedEvent
 from app.services.classifier import get_classifier
 from app.services.company_data import apply_user_categories, load_operations_frame
-
-_KIND_TO_CATEGORY = {"invoice_out": "client_payment", "invoice_in": "suppliers", "tax": "tax"}
-
+from app.services.events_mapping import to_domain_event  # noqa: F401 — реэкспорт для роутов
+from app.services.snapshots import save_snapshot
 
 @dataclass(slots=True)
 class CompanyModel:
@@ -80,17 +79,6 @@ def planned_events(session: Session, company: Company, after: date) -> list[Plan
     return [to_domain_event(r) for r in rows]
 
 
-def to_domain_event(r: PlannedEventRow) -> PlannedEvent:
-    source = {"manual": EventSource.MANUAL, "1c": EventSource.ONEC}.get(r.source, EventSource.MANUAL)
-    return PlannedEvent(
-        event_date=r.event_date, amount=float(r.amount), direction=Direction(r.direction), title=r.title,
-        category=_KIND_TO_CATEGORY.get(r.kind, "other"), source=source,
-        probability=CONFIDENCE_PROB[Confidence(r.confidence)],
-        date_jitter_days=3 if r.kind == "invoice_out" else 0,   # клиенты платят по счетам с задержкой
-        counterparty_key=r.counterparty_key, ref=r.id,
-    )
-
-
 def run_forecast(session: Session, company: Company, scenario: Scenario | None = None,
                  horizon: int | None = None) -> tuple[ForecastResult, CompanyModel]:
     s = get_settings()
@@ -99,8 +87,29 @@ def run_forecast(session: Session, company: Company, scenario: Scenario | None =
     result = forecast(cm.fitted, events, horizon=horizon or s.forecast_horizon, n_sims=s.forecast_sims,
                       seed=s.forecast_seed, threshold=float(company.min_balance), scenario=scenario,
                       data_warnings=cm.prep.quality.warnings)
+    if scenario is None and horizon in (None, s.forecast_horizon):
+        # Сохраняем только «официальный» прогноз: сценарии и черновики — это не обещание, их не сравниваем с фактом.
+        save_snapshot(session, company, result, events)
     return result, cm
 
 
 def quality_of(cm: CompanyModel) -> QualityReport:
     return cm.prep.quality
+
+
+def run_preview(session: Session, company: Company, *, exclude_db_ids: set[str],
+                extra_events: list[PlannedEvent], scenario: Scenario | None = None) -> ForecastResult:
+    """Черновик правок: пересчёт без записи в БД и без снимка.
+
+    Исключённые операции не удаляются из истории остатка (факт есть факт) — они просто не учат модель.
+    Так предприниматель говорит «эта поставка была разовой, не жди её снова».
+    """
+    s = get_settings()
+    cm = company_model(session, company)
+    fitted = cm.fitted
+    if exclude_db_ids:
+        ops = cm.prep.ops[~cm.prep.ops["db_id"].isin(exclude_db_ids)]
+        fitted = fit(ops, cm.prep.panel)
+    events = planned_events(session, company, fitted.as_of) + extra_events
+    return forecast(fitted, events, horizon=s.forecast_horizon, n_sims=s.forecast_sims, seed=s.forecast_seed,
+                    threshold=float(company.min_balance), scenario=scenario, data_warnings=cm.prep.quality.warnings)

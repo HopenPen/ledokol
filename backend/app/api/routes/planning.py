@@ -6,17 +6,18 @@ from sqlalchemy import select
 
 from app.api.deps import DbSession, OwnedCompany
 from app.api.schemas import (
-    AskIn, AskOut, CounterpartyCheckOut, EventIn, EventOut, ForecastOut, PlanFactRow, ScenarioDelta, ScenarioIn,
-    ScenarioOut, SyncOut,
+    AskIn, AskOut, CounterpartyCheckOut, DailyPlanFactOut, DayCompareOut, EventIn, EventOut, EventPatch, ForecastOut,
+    PlanFactRow, PreviewIn, RunOut, ScenarioDelta, ScenarioIn, ScenarioOut, SyncOut,
 )
 from app.db.models import PlannedEvent as PlannedEventRow
-from app.domain.planfact import match_events
+from app.domain.planfact import compare_daily, match_events
 from app.domain.scenarios import ClientDelay, ExtraExpense, Scenario
-from app.domain.types import ForecastResult
+from app.domain.types import Direction, EventSource, ForecastResult, PlannedEvent
 from app.integrations.http import IntegrationError
 from app.llm.assistant import ask
 from app.services.events import IdempotencyConflict, NewEvent, cancel_event, create_manual_event
-from app.services.forecasting import company_model, run_forecast, to_domain_event
+from app.services.forecasting import company_model, run_forecast, run_preview, to_domain_event
+from app.services.snapshots import runs_before
 from app.services.integrations import check_counterparties, sync_onec
 
 router = APIRouter(prefix="/companies/{company_id}", tags=["planning"])
@@ -51,21 +52,53 @@ def delete_event(company: OwnedCompany, event_id: str, session: DbSession) -> No
     cancel_event(session, ev)
 
 
+@router.patch("/events/{event_id}", response_model=EventOut)
+def patch_event(company: OwnedCompany, event_id: str, body: EventPatch, session: DbSession) -> PlannedEventRow:
+    """Платёж не пришёл, но клиент обещал позже → переносим ожидание; или отменяем. Прогноз пересчитается сам."""
+    ev = session.get(PlannedEventRow, event_id)
+    if ev is None or ev.company_id != company.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Событие не найдено")
+    if body.event_date is not None:
+        ev.event_date, ev.status = body.event_date, "expected"
+    if body.status is not None:
+        ev.status = body.status
+    session.commit()
+    return ev
+
+
 # --- сценарии «что если» --------------------------------------------------------------------------------------
 @router.post("/scenarios", response_model=ScenarioOut)
 def run_scenario(company: OwnedCompany, body: ScenarioIn, session: DbSession) -> ScenarioOut:
-    sc = Scenario(
-        client_delays=tuple(ClientDelay(d.counterparty_key, d.weeks) for d in body.client_delays),
-        revenue_drop_pct=body.revenue_drop_pct,
-        extra_expenses=tuple(ExtraExpense(x.date, float(x.amount), x.title) for x in body.extra_expenses),
-        fixed_cost_increase_pct=body.fixed_cost_increase_pct,
-    )
+    sc = _scenario(body)
     try:
         base, _ = run_forecast(session, company)
         neg, _ = run_forecast(session, company, scenario=sc)
     except LookupError:
         raise HTTPException(status.HTTP_409_CONFLICT, "Сначала загрузите выписку") from None
     return ScenarioOut(base=ForecastOut.of(base), scenario=ForecastOut.of(neg), delta=_delta(base, neg))
+
+
+def _scenario(body: ScenarioIn) -> Scenario:
+    return Scenario(
+        client_delays=tuple(ClientDelay(d.counterparty_key, d.weeks) for d in body.client_delays),
+        revenue_drop_pct=body.revenue_drop_pct,
+        extra_expenses=tuple(ExtraExpense(x.date, float(x.amount), x.title) for x in body.extra_expenses),
+        fixed_cost_increase_pct=body.fixed_cost_increase_pct,
+    )
+
+
+@router.post("/forecast/preview", response_model=ForecastOut)
+def preview(company: OwnedCompany, body: PreviewIn, session: DbSession) -> ForecastOut:
+    """Черновик правок: исключить операции из обучения, добавить события, наложить сценарий. Ничего не сохраняет."""
+    extra = [PlannedEvent(event_date=e.event_date, amount=float(e.amount), direction=Direction(e.direction),
+                          title=f"{e.title} (черновик)", category="other", source=EventSource.SCENARIO)
+             for e in body.extra_events]
+    try:
+        result = run_preview(session, company, exclude_db_ids=set(body.exclude_operation_ids),
+                             extra_events=extra, scenario=_scenario(body))
+    except LookupError:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Сначала загрузите выписку") from None
+    return ForecastOut.of(result)
 
 
 def _delta(base: ForecastResult, neg: ForecastResult) -> ScenarioDelta:
@@ -94,6 +127,21 @@ def plan_fact(company: OwnedCompany, session: DbSession) -> list[PlanFactRow]:
     return [PlanFactRow(event_id=m.event.ref, title=m.event.title, planned_date=m.event.event_date,
                         planned_amount=m.event.amount, status=m.status, actual_amount=m.actual_amount,
                         actual_date=m.actual_date) for m in matches]
+
+
+@router.get("/plan-fact/daily", response_model=DailyPlanFactOut)
+def plan_fact_daily(company: OwnedCompany, session: DbSession, run_id: str | None = None) -> DailyPlanFactOut:
+    """График план-факт (звёздочка 2): прогноз, сделанный по прошлой выписке, против фактического остатка."""
+    cm = company_model(session, company)
+    runs = runs_before(session, company, cm.fitted.as_of)
+    run = next((r for r in runs if r.id == run_id), None) if run_id else (runs[0] if runs else None)
+    if run is None:
+        return DailyPlanFactOut(run=None, rows=[], flagged_days=0)
+    pts = [(p.day, float(p.p10), float(p.p50), float(p.p90)) for p in run.points]
+    rows = compare_daily(pts, cm.prep.panel)
+    return DailyPlanFactOut(run=RunOut.model_validate(run), flagged_days=sum(r.flagged for r in rows),
+                            rows=[DayCompareOut(date=r.day, plan=r.plan, low=r.low, high=r.high, fact=r.fact,
+                                                deviation=r.deviation, flagged=r.flagged) for r in rows])
 
 
 # --- интеграции -----------------------------------------------------------------------------------------------

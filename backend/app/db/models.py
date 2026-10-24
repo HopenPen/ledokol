@@ -129,3 +129,40 @@ class PlannedEvent(Base):
     request_hash: Mapped[str | None] = mapped_column(String(64))
     external_ref: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ForecastRun(Base):
+    """Снимок прогноза. Нужен, чтобы через время сравнить «что обещали» с тем, что случилось (план-факт).
+
+    Повторный расчёт на тех же данных не плодит снимки: (компания, версия выписки, хеш событий) уникальны.
+    """
+
+    __tablename__ = "forecast_runs"
+    __table_args__ = (
+        UniqueConstraint("company_id", "data_version", "events_hash", name="uq_run_inputs"),
+        CheckConstraint("horizon > 0", name="ck_run_horizon"),
+        Index("ix_runs_company_asof", "company_id", "as_of"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    company_id: Mapped[str] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"))
+    as_of: Mapped[date] = mapped_column(Date)            # последняя дата выписки, на которую строили прогноз
+    data_version: Mapped[int]
+    events_hash: Mapped[str] = mapped_column(String(64))
+    model_version: Mapped[str] = mapped_column(String(32))
+    horizon: Mapped[int]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    points: Mapped[list[ForecastPointRow]] = relationship(cascade="all, delete-orphan", passive_deletes=True,
+                                                          order_by="ForecastPointRow.day")
+
+
+class ForecastPointRow(Base):
+    __tablename__ = "forecast_points"
+    __table_args__ = (CheckConstraint("p10 <= p50 AND p50 <= p90", name="ck_point_quantiles"),)
+
+    run_id: Mapped[str] = mapped_column(ForeignKey("forecast_runs.id", ondelete="CASCADE"), primary_key=True)
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    p10: Mapped[Decimal] = mapped_column(Money)
+    p50: Mapped[Decimal] = mapped_column(Money)
+    p90: Mapped[Decimal] = mapped_column(Money)

@@ -93,6 +93,12 @@ class EventIn(_In):
     counterparty_key: str | None = Field(default=None, max_length=64)
 
 
+class EventPatch(_In):
+    """Перенести ожидание («клиент обещал заплатить на следующей неделе») или отменить событие."""
+    event_date: date | None = None
+    status: Literal["expected", "cancelled"] | None = None
+
+
 class EventOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
@@ -185,6 +191,7 @@ class DashboardOut(BaseModel):
     history: list[HistoryPoint]
     top_clients: list[ClientOut]
     model_version: str
+    missed_payments: list[EventOut] = []   # ожидали, срок прошёл, денег нет — показываем предупреждением
 
 
 # --- scenarios ------------------------------------------------------------------------------------------------
@@ -251,3 +258,32 @@ class AskIn(_In):
 class AskOut(BaseModel):
     answer: str
     generated_by: str
+
+
+class RunOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    as_of: date
+    model_version: str
+
+
+class DayCompareOut(BaseModel):
+    date: date
+    plan: float
+    low: float
+    high: float
+    fact: float
+    deviation: float
+    flagged: bool
+
+
+class DailyPlanFactOut(BaseModel):
+    run: RunOut | None          # с каким прогнозом сравниваем (сделанным по прошлой выписке)
+    rows: list[DayCompareOut]
+    flagged_days: int
+
+
+class PreviewIn(ScenarioIn):
+    """Черновик: «а если не учитывать эту операцию и добавить вот это событие» — без сохранения."""
+    exclude_operation_ids: list[str] = Field(default_factory=list, max_length=200)
+    extra_events: list[EventIn] = Field(default_factory=list, max_length=50)

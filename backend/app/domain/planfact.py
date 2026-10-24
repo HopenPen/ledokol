@@ -45,6 +45,33 @@ def match_events(events: list[PlannedEvent], ops: pd.DataFrame, as_of: date) -> 
     return out
 
 
+@dataclass(frozen=True, slots=True)
+class DayCompare:
+    day: date
+    plan: float          # P50 сохранённого прогноза
+    low: float           # P10
+    high: float          # P90
+    fact: float          # фактический остаток на конец дня
+    deviation: float     # факт − план
+    flagged: bool        # факт вышел за «обычный разброс» — подсвечиваем на графике
+
+
+def compare_daily(points: list[tuple[date, float, float, float]], panel: pd.DataFrame) -> list[DayCompare]:
+    """План (снимок прогноза) против факта по дням — для графика из звёздочки 2.
+
+    Сравниваем только дни, по которым уже есть выписка. «Отклонение выделено», если факт вне P10–P90:
+    это и есть «случилось то, чего модель не ждала», а не произвольный порог в процентах.
+    """
+    fact = panel.set_index(panel["date"].dt.date)["balance"]
+    out = []
+    for day, p10, p50, p90 in points:
+        if day not in fact.index:
+            continue
+        f = float(fact[day])
+        out.append(DayCompare(day, p50, p10, p90, f, f - p50, not (p10 <= f <= p90)))
+    return out
+
+
 def weekly_plan_fact(matches: list[Match]) -> pd.DataFrame:
     rows = [{"week": pd.Timestamp(m.event.event_date).to_period("W").start_time.date(),
              "plan": m.event.signed, "fact": m.actual_amount * (1 if m.event.signed > 0 else -1)}

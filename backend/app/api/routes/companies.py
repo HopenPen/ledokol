@@ -6,10 +6,12 @@ from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession, OwnedCompany
 from app.api.schemas import (
-    AlertOut, ClientOut, CompanyOut, CompanyPatch, DashboardOut, ForecastOut, HistoryPoint, ImportOut, QualityOut,
+    AlertOut, ClientOut, CompanyOut, CompanyPatch, DashboardOut, EventOut, ForecastOut, HistoryPoint, ImportOut,
+    QualityOut,
 )
 from app.core.config import get_settings
 from app.db.models import Company
+from app.db.models import PlannedEvent as PlannedEventRow
 from app.domain.forecast import MODEL_VERSION
 from app.domain.ingest import StatementFormatError
 from app.services.forecasting import run_forecast
@@ -82,6 +84,9 @@ def dashboard(company: OwnedCompany, session: DbSession) -> DashboardOut:
         history=[HistoryPoint(date=d.date(), balance=float(b)) for d, b in zip(hist["date"], hist["balance"])],
         top_clients=[ClientOut(counterparty_key=k, name=n, share=s) for k, n, s in cm.fitted.top_clients],
         model_version=MODEL_VERSION,
+        missed_payments=[EventOut.model_validate(e) for e in session.scalars(select(PlannedEventRow).where(
+            PlannedEventRow.company_id == company.id, PlannedEventRow.status == "missed")
+            .order_by(PlannedEventRow.event_date.desc()).limit(10))],
     )
 
 

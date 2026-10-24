@@ -18,8 +18,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import Company, Operation, StatementImport, User
+from app.db.models import PlannedEvent as PlannedEventRow
 from app.domain.ingest import QualityReport, read_statement
 from app.domain.pipeline import prepare_company
+from app.domain.planfact import match_events
+from app.services.events_mapping import to_domain_event
 from app.services.company_data import load_operations_frame
 from app.services.classifier import get_classifier
 
@@ -93,4 +96,23 @@ def _relabel(session: Session, company: Company) -> QualityReport:
         op.quality = lab["quality"]
         if op.category_source != "user":   # ручную правку пользователя модель не перетирает
             op.category, op.category_source, op.confidence = lab["category"], lab["category_source"], float(lab["confidence"])
+    _reconcile_events(session, company, prep)
     return prep.quality
+
+
+def _reconcile_events(session: Session, company: Company, prep) -> None:
+    """План-факт при поступлении факта: ожидаемые события, срок которых наступил, сверяем с новой выпиской.
+
+    Пришло → «received», пришло частично → «partial», срок прошёл и денег нет → «missed». Missed-события
+    показываются на главном экране предупреждением, а в прогноз они уже не входят — он пересчитается сам.
+    """
+    as_of = prep.panel["date"].iloc[-1].date()
+    due = list(session.scalars(select(PlannedEventRow).where(
+        PlannedEventRow.company_id == company.id, PlannedEventRow.status == "expected",
+        PlannedEventRow.event_date <= as_of)))
+    if not due:
+        return
+    by_id = {e.id: e for e in due}
+    for m in match_events([to_domain_event(e) for e in due], prep.ops, as_of):
+        if m.status != "pending":
+            by_id[m.event.ref].status = m.status
