@@ -1,0 +1,36 @@
+# Всё приложение одной командой: docker compose up --build
+# Данные кейса положите в ./data/statements (C001.csv … C150.csv).
+services:
+  api:
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      CASHFLOW_DATABASE_URL: postgresql+psycopg://cashflow:cashflow@db:5432/cashflow
+      CASHFLOW_ONEC_BASE_URL: http://onec:8101
+      CASHFLOW_FNS_BASE_URL: http://fns:8102
+    ports: ["8000:8000"]
+    depends_on: [db, onec, fns]
+
+  web:
+    build: ./frontend
+    ports: ["5173:80"]
+    depends_on: [api]
+
+  db:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: cashflow, POSTGRES_PASSWORD: cashflow, POSTGRES_DB: cashflow }
+    volumes: [pgdata:/var/lib/postgresql/data]
+
+  onec:
+    build: ./mocks
+    command: uvicorn onec_mock:app --host 0.0.0.0 --port 8101
+    environment: { MOCK_DATA_DIR: /data/statements, MOCK_TOKEN: "${MOCK_TOKEN:-dev-mock-token}" }
+    volumes: ["./data:/data:ro"]
+
+  fns:
+    build: ./mocks
+    command: uvicorn fns_mock:app --host 0.0.0.0 --port 8102
+    environment: { MOCK_TOKEN: "${MOCK_TOKEN:-dev-mock-token}" }
+
+volumes:
+  pgdata:
