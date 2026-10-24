@@ -1,60 +1,68 @@
 <script setup lang="ts">
-// План-факт: сверху график «ожидали vs было» по дням, ниже — какие ожидаемые платежи пришли, а какие нет.
+// План-факт: «ожидали и было» по дням и список ожидаемых платежей со статусами.
 import { computed, inject, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { api, ApiError, type DailyPlanFact, type PlanFactRow } from '../api'
+import { api, ApiError, type DailyPlanFact, type ImportResult, type PlanFactRow } from '../api'
 import PlanFactChart from '../components/PlanFactChart.vue'
-import { humanDate, rub } from '../format'
+import StatementUpload from '../components/StatementUpload.vue'
+import { humanDate, importSummary, money, rub } from '../format'
 
 const route = useRoute()
 const id = route.params.id as string
 const reload = inject<() => Promise<void>>('reload')!
+const toast = inject<(t: string) => void>('toast')!
 const rows = ref<PlanFactRow[]>([])
 const daily = ref<DailyPlanFact | null>(null)
 const error = ref('')
-const STATUS = { received: 'Пришло', partial: 'Частично', missed: 'Не пришло', pending: 'Ждём' } as Record<string, string>
+const loading = ref(true)
+const STATUS: Record<string, { label: string; cls: string }> = {
+  received: { label: 'Пришло', cls: 'chip-brand' }, partial: { label: 'Частично', cls: 'chip-warn' },
+  missed: { label: 'Не пришло', cls: 'chip-risk' }, pending: { label: 'Ждём', cls: '' }, expected: { label: 'Ждём', cls: '' },
+}
 
 const summary = computed(() => {
   const d = daily.value
   if (!d?.run || !d.rows.length) return ''
   const last = d.rows[d.rows.length - 1]
   const sign = last.deviation >= 0 ? 'больше' : 'меньше'
-  return `Прогноз от ${humanDate(d.run.as_of)}: сейчас на счёте на ${rub(Math.abs(last.deviation))} ${sign}, чем ожидали. `
-    + (d.flagged_days ? `Необычных дней: ${d.flagged_days}.` : 'Всё в пределах обычного разброса.')
+  return `Сейчас на счёте на ${rub(Math.abs(last.deviation))} ${sign}, чем ожидали в прогнозе от ${humanDate(d.run.as_of)}.`
 })
 
 async function load() {
-  try {
-    [rows.value, daily.value] = await Promise.all([api.planFact(id), api.planFactDaily(id)])
-  } catch (e) { error.value = (e as Error).message }
+  loading.value = true
+  error.value = ''
+  try { [rows.value, daily.value] = await Promise.all([api.planFact(id), api.planFactDaily(id)]) }
+  catch (e) { error.value = e instanceof ApiError ? e.message : 'Не удалось загрузить план-факт' }
+  finally { loading.value = false }
 }
 onMounted(load)
 
-async function onFile(ev: Event) {
-  const file = (ev.target as HTMLInputElement).files?.[0]
-  if (!file) return
-  try {
-    await api.uploadStatement(id, file)
-    await reload()
-    await load()
-  } catch (e) {
-    error.value = e instanceof ApiError ? e.message : 'Не удалось загрузить выписку'
-  }
+async function afterImport(results: ImportResult[]) {
+  toast(importSummary(results))
+  await reload()
+  await load()
 }
 </script>
 
 <template>
-  <div class="stack">
+  <div class="pf">
+    <div class="head">
+      <div>
+        <h1>План-факт</h1>
+        <p class="muted small">Насколько сбылся прошлый прогноз и пришли ли ожидаемые деньги.</p>
+      </div>
+      <StatementUpload :company-id="id" label="Загрузить новую выписку" @imported="afterImport" @error="toast" />
+    </div>
+    <p v-if="error" class="error" role="alert">{{ error }}</p>
+
     <section class="card">
-      <header class="head">
-        <div>
-          <h2>Ожидали и было</h2>
-          <p class="muted">Прошлый прогноз против фактического остатка. Красные точки — дни, когда остаток вышел за обычный разброс.</p>
-        </div>
-        <label class="btn btn-primary">Загрузить новую выписку<input type="file" accept=".csv" hidden @change="onFile" /></label>
-      </header>
-      <p v-if="error" class="error">{{ error }}</p>
-      <p v-if="!daily?.run" class="muted">Сравнивать пока не с чем: загрузите выписку за следующие дни — увидите, насколько сбылся сегодняшний прогноз.</p>
+      <div class="card-head"><h2>Ожидали и было</h2>
+        <span v-if="daily?.run" class="chip" :class="daily.flagged_days ? 'chip-risk' : 'chip-brand'">
+          {{ daily.flagged_days ? `необычных дней: ${daily.flagged_days}` : 'всё в пределах разброса' }}
+        </span>
+      </div>
+      <div v-if="loading" class="skeleton" style="height: 300px" />
+      <p v-else-if="!daily?.run" class="muted">Сравнивать пока не с чем. Загрузите выписку за следующие дни, и здесь будет видно, насколько сбылся сегодняшний прогноз.</p>
       <template v-else>
         <p class="summary">{{ summary }}</p>
         <PlanFactChart :rows="daily.rows" />
@@ -62,36 +70,36 @@ async function onFile(ev: Event) {
     </section>
 
     <section class="card">
-      <h2>Ожидаемые платежи</h2>
-      <p v-if="!rows.length" class="muted">Добавьте ожидаемые платежи на вкладке «Прогноз» — здесь будет видно, пришли ли они.</p>
-      <table v-else>
-        <thead><tr><th>Что ждали</th><th>Когда</th><th class="r">Сколько</th><th>Статус</th><th class="r">Пришло</th></tr></thead>
-        <tbody>
-          <tr v-for="r in rows" :key="(r.event_id ?? '') + r.planned_date">
-            <td>{{ r.title }}</td>
-            <td>{{ humanDate(r.planned_date) }}</td>
-            <td class="r num">{{ rub(r.planned_amount) }}</td>
-            <td><span class="status" :class="r.status">{{ STATUS[r.status] }}</span></td>
-            <td class="r num">{{ r.actual_amount ? rub(r.actual_amount) : '—' }}</td>
-          </tr>
-        </tbody>
-      </table>
+      <div class="card-head"><h2>Ожидаемые платежи</h2></div>
+      <p v-if="!loading && !rows.length" class="muted">Платежей для сверки пока нет. Здесь появятся платежи, срок которых наступил по данным выписки. Будущие платежи видны на главной.</p>
+      <div v-else class="table-wrap">
+        <table>
+          <thead><tr><th>Что ждали</th><th>Когда</th><th class="r">Сколько</th><th>Статус</th><th class="r">Пришло</th></tr></thead>
+          <tbody>
+            <tr v-for="r in rows" :key="(r.event_id ?? '') + r.planned_date + r.title">
+              <td class="t-title">{{ r.title }}</td>
+              <td class="num">{{ humanDate(r.planned_date) }}</td>
+              <td class="r num">{{ money(r.planned_amount) }}</td>
+              <td><span class="chip" :class="STATUS[r.status]?.cls">{{ STATUS[r.status]?.label ?? r.status }}</span></td>
+              <td class="r num">{{ r.actual_amount ? money(r.actual_amount) : '—' }}<span v-if="r.actual_date" class="tiny"> · {{ humanDate(r.actual_date) }}</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </section>
   </div>
 </template>
 
 <style scoped>
-.stack { display: grid; gap: 20px; }
-.head { display: flex; justify-content: space-between; gap: 12px; align-items: start; margin-bottom: 12px; }
-h2 { font-size: 18px; }
-.muted { color: var(--muted); margin: 4px 0 0; }
-.summary { font-weight: 500; }
-table { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 8px; }
-th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--line); }
-td { padding: 8px; border-bottom: 1px solid var(--line); }
+.pf { display: grid; gap: 16px; }
+.head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
+.head h1 { margin-bottom: 4px; }
+.summary { font-weight: 600; margin-bottom: 8px; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 15px; min-width: 560px; }
+th { text-align: left; color: var(--ink-3); font-weight: 550; font-size: 13px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+td { padding: 12px; border-bottom: 1px solid var(--line); }
+tr:last-child td { border-bottom: 0; }
 .r { text-align: right; }
-.status { padding: 2px 8px; border-radius: 999px; font-size: 13px; background: var(--paper); }
-.status.received { background: var(--green-wash); color: var(--green); }
-.status.partial { background: var(--warn-wash); color: var(--warn); }
-.status.missed { background: var(--risk-wash); color: var(--risk); }
+.t-title { font-weight: 550; }
 </style>

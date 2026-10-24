@@ -1,54 +1,159 @@
-/* Токены дизайна. Одна яркая вещь на экране — фраза-ответ; всё остальное спокойное.
-   Зелёный — «деньги есть», красный — только риск нехватки. */
+/* «Деньги, вперёд!» — строгий зелёный.
+   Зелёный — фирменный цвет и «деньги есть», красный — только риск нехватки, янтарный — «обратите внимание».
+   Одна громкая вещь на экране — фраза-ответ на главной; всё остальное спокойное и ровное.
+   Шрифт Onest лежит в проекте (не тянем с серверов Google: быстрее и адрес пользователя не уходит за рубеж). */
+@import '@fontsource-variable/onest';
+
 :root {
-  --paper: #f3f7f5;
+  --bg: #f5f7f6;
   --surface: #ffffff;
-  --ink: #13241d;
-  --ink-2: #4a5d55;
-  --muted: #7c8c85;
-  --line: #dde6e1;
-  --green: #0f7b57;
-  --green-wash: #e3f1ea;
-  --band: #cfe3d8;
+  --surface-2: #eef2f0;
+  --line: #dce3df;
+  --line-strong: #c4cec9;
+  --ink: #121a17;
+  --ink-2: #4b5852;
+  --ink-3: #6b7771;
+
+  --brand: #0b6b4f;
+  --brand-hover: #085a42;
+  --brand-soft: #e2f0ea;
+  --brand-band: #cfe5da;
+
   --risk: #b42318;
-  --risk-wash: #fbeae8;
-  --warn: #a8650f;
-  --warn-wash: #fbf1e2;
-  --radius-s: 6px;
-  --radius-l: 14px;
-  font-family: 'Onest', system-ui, sans-serif;
-  color: var(--ink);
-  background: var(--paper);
-  font-size: 15px;
+  --risk-soft: #fdecea;
+  --risk-line: #f3c5c0;
+  --warn: #8a5300;
+  --warn-soft: #fff3dc;
+  --warn-line: #f0d9a8;
+
+  --radius: 10px;
+  --radius-s: 8px;
+  --shadow-pop: 0 12px 32px rgb(18 26 23 / 0.14), 0 2px 6px rgb(18 26 23 / 0.06);
+  --page: 1200px;
+
+  font-family: 'Onest Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 16px;
   line-height: 1.5;
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; }
-h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
-button, input, select { font: inherit; color: inherit; }
-.num { font-variant-numeric: tabular-nums; }
+html { scroll-behavior: smooth; }
+body { margin: 0; min-width: 320px; }
+h1, h2, h3, h4 { margin: 0; font-weight: 650; letter-spacing: -0.015em; line-height: 1.2; }
+h1 { font-size: 28px; }
+h2 { font-size: 20px; }
+h3 { font-size: 17px; }
+p { margin: 0; }
+button, input, select, textarea { font: inherit; color: inherit; }
+a { color: var(--brand); }
+img, svg { display: block; }
 
+/* Суммы и даты в колонках — табличные цифры, чтобы разряды стояли ровно. */
+.num, .amount { font-variant-numeric: tabular-nums; }
+.in { color: var(--brand); }
+.muted { color: var(--ink-2); }
+.small { font-size: 14px; }
+.tiny { font-size: 13px; color: var(--ink-3); }
+.error { color: var(--risk); font-size: 14px; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+:focus-visible { outline: 3px solid color-mix(in srgb, var(--brand) 45%, transparent); outline-offset: 2px; border-radius: 6px; }
+
+/* --- кнопки --------------------------------------------------------------------------------------------- */
 .btn {
-  border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius-s);
-  padding: 8px 14px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 40px; padding: 8px 16px; border-radius: var(--radius-s);
+  border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink);
+  font-weight: 550; font-size: 15px; cursor: pointer; text-decoration: none; white-space: nowrap;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
 }
-.btn:hover { border-color: var(--ink-2); }
-.btn-primary { background: var(--green); border-color: var(--green); color: #fff; }
-.btn-primary:hover { background: #0b6647; }
-.btn:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible {
-  outline: 2px solid var(--green); outline-offset: 2px;
+.btn:hover { border-color: var(--ink-3); background: var(--surface-2); }
+.btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.btn-primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+.btn-primary:hover { background: var(--brand-hover); border-color: var(--brand-hover); }
+.btn-ghost { border-color: transparent; background: transparent; color: var(--ink-2); }
+.btn-ghost:hover { background: var(--surface-2); border-color: transparent; color: var(--ink); }
+.btn-danger { color: var(--risk); }
+.btn-danger:hover { background: var(--risk-soft); border-color: var(--risk-line); }
+.btn-sm { min-height: 32px; padding: 4px 10px; font-size: 14px; }
+.btn-icon { min-height: 36px; width: 36px; padding: 0; }
+.btn svg { width: 18px; height: 18px; flex: none; }
+.btn-sm svg { width: 16px; height: 16px; }
+
+/* Переключатель из нескольких кнопок (горизонт, направление). */
+.seg { display: inline-flex; padding: 3px; background: var(--surface-2); border-radius: var(--radius-s); gap: 2px; }
+.seg button {
+  min-height: 32px; padding: 4px 12px; border: 0; border-radius: 6px; background: transparent;
+  color: var(--ink-2); font-weight: 550; font-size: 14px; cursor: pointer;
+}
+.seg button[aria-pressed='true'] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgb(18 26 23 / 0.12); }
+
+/* --- поверхности ---------------------------------------------------------------------------------------- */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; }
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.card-head p { margin-top: 4px; }
+
+/* --- формы ---------------------------------------------------------------------------------------------- */
+.field { display: grid; gap: 6px; margin-bottom: 16px; font-size: 14px; font-weight: 550; }
+.field .hint { font-weight: 400; color: var(--ink-3); font-size: 13px; }
+.input, .field input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']), .field select, .field textarea, select.input {
+  width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-s);
+  background: var(--surface); font-size: 16px; font-weight: 400;
+}
+.field input:focus, .field select:focus, .input:focus { border-color: var(--brand); outline: 3px solid var(--brand-soft); outline-offset: 0; }
+.check { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; color: var(--ink-2); cursor: pointer; }
+.check input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--brand); }
+input[type='range'] { width: 100%; accent-color: var(--brand); }
+
+/* --- метки --------------------------------------------------------------------------------------------- */
+.chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px;
+  font-size: 13px; font-weight: 550; background: var(--surface-2); color: var(--ink-2); white-space: nowrap;
+}
+.chip svg { width: 14px; height: 14px; }
+.chip-brand { background: var(--brand-soft); color: var(--brand); }
+.chip-risk { background: var(--risk-soft); color: var(--risk); }
+.chip-warn { background: var(--warn-soft); color: var(--warn); }
+
+/* Источник события: откуда сервис знает об этих деньгах (требование кейса). */
+.src { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 6px; font-size: 12px;
+  font-weight: 600; border: 1px solid var(--line); color: var(--ink-2); background: var(--surface); white-space: nowrap; }
+.src-history { color: var(--ink-2); }
+.src-calendar { color: var(--warn); border-color: var(--warn-line); }
+.src-manual { color: var(--brand); border-color: var(--brand-band); }
+.src-1c { color: #2f4b9a; border-color: #cdd6f2; }
+.src-scenario { color: var(--risk); border-color: var(--risk-line); }
+
+/* --- диалоги -------------------------------------------------------------------------------------------- */
+dialog.modal {
+  width: min(520px, calc(100% - 32px)); max-height: calc(100dvh - 32px); padding: 0; border: 0;
+  border-radius: 14px; box-shadow: var(--shadow-pop); color: var(--ink); background: var(--surface);
+}
+dialog.modal::backdrop { background: rgb(18 26 23 / 0.4); }
+.modal-body { padding: 24px; overflow-y: auto; }
+.modal-head { display: flex; justify-content: space-between; align-items: start; gap: 12px; margin-bottom: 16px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 16px 24px; border-top: 1px solid var(--line); background: var(--bg); border-radius: 0 0 14px 14px; }
+fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+
+/* --- состояние «пусто/загрузка» ------------------------------------------------------------------------- */
+.state { display: grid; justify-items: start; gap: 8px; padding: 32px 0; color: var(--ink-2); }
+.skeleton { background: linear-gradient(90deg, var(--surface-2), #f6f8f7, var(--surface-2)); background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite; border-radius: var(--radius-s); }
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+.toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 50; max-width: calc(100% - 32px);
+  background: var(--ink); color: #fff; padding: 12px 16px; border-radius: var(--radius-s); box-shadow: var(--shadow-pop); font-size: 14px;
 }
 
-.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-l); padding: 20px; }
-.field { display: grid; gap: 4px; margin-bottom: 12px; }
-.field input, .field select {
-  border: 1px solid var(--line); border-radius: var(--radius-s); padding: 8px 10px; background: var(--surface);
+@media (max-width: 640px) {
+  .card { padding: 16px; }
+  h1 { font-size: 24px; }
 }
-.badge { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--paper); color: var(--ink-2); }
-.badge-manual { background: var(--green-wash); color: var(--green); }
-.badge-1c { background: #eaeefb; color: #3446a0; }
-.badge-scenario { background: var(--warn-wash); color: var(--warn); }
-.error { color: var(--risk); }
 
-@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+}

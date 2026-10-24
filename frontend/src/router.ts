@@ -13,7 +13,7 @@ export const router = createRouter({
       path: '/companies/:id',
       component: () => import('./views/CompanyLayout.vue'),
       children: [
-        { path: '', component: () => import('./views/ForecastView.vue') },
+        { path: '', component: () => import('./views/ForecastView.vue'), meta: { title: 'Главная' } },
         { path: 'scenarios', component: () => import('./views/ScenariosView.vue') },
         { path: 'operations', component: () => import('./views/OperationsView.vue') },
         { path: 'plan-fact', component: () => import('./views/PlanFactView.vue') },
@@ -23,4 +23,8 @@ export const router = createRouter({
   ],
 })
 
-router.beforeEach((to) => (!to.meta.public && !isLoggedIn() ? '/login' : true))
+router.beforeEach((to) => {
+  if (!to.meta.public && !isLoggedIn()) return '/login'
+  if (to.meta.public && isLoggedIn() && (to.path === '/login' || to.path === '/register')) return '/companies'
+  return true
+})

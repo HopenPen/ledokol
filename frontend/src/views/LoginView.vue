@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import { Landmark } from 'lucide-vue-next'
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { api, ApiError } from '../api'
+import { api, ApiError, SSO_CENTRINVEST_URL } from '../api'
 import AuthLayout from '../components/AuthLayout.vue'
 
 const login = ref('')
@@ -17,11 +18,11 @@ async function submit() {
   needsVerification.value = false
   busy.value = true
   try {
-    await api.login(login.value, password.value)
+    await api.login(login.value.trim(), password.value)
     router.push('/companies')
   } catch (e) {
     needsVerification.value = e instanceof ApiError && e.status === 403
-    error.value = e instanceof ApiError ? e.message : 'Сервер недоступен'
+    error.value = e instanceof ApiError ? e.message : 'Сервер недоступен. Попробуйте ещё раз через минуту'
   } finally {
     busy.value = false
   }
@@ -30,15 +31,36 @@ async function submit() {
 
 <template>
   <AuthLayout>
-    <form @submit.prevent="submit">
-      <h1>Войти в приложение</h1>
+    <form novalidate @submit.prevent="submit">
+      <h1>Вход</h1>
       <p class="lead">Прогноз остатка на счёте и предупреждения, если денег может не хватить.</p>
-      <label class="field">Email или логин <input v-model="login" autocomplete="username" maxlength="254" required /></label>
-      <label class="field">Пароль <input v-model="password" type="password" autocomplete="current-password" required /></label>
-      <p v-if="error" class="error" role="alert">{{ error }}</p>
-      <p v-if="needsVerification"><RouterLink to="/register?resend=1">Отправить письмо ещё раз</RouterLink></p>
-      <button class="btn btn-primary submit" :disabled="busy">{{ busy ? 'Входим…' : 'Войти' }}</button>
-      <p class="foot">Нет аккаунта? <RouterLink to="/register">Зарегистрироваться</RouterLink></p>
+      <label class="field">Email или логин
+        <input v-model="login" autocomplete="username" maxlength="254" required autofocus />
+      </label>
+      <label class="field">Пароль
+        <input v-model="password" type="password" autocomplete="current-password" required />
+      </label>
+      <p v-if="error" class="error form-error" role="alert">{{ error }}</p>
+      <p v-if="needsVerification" class="foot-link"><RouterLink to="/register?resend=1">Отправить письмо подтверждения</RouterLink></p>
+      <button class="btn btn-primary submit" :disabled="busy || !login || !password">{{ busy ? 'Входим…' : 'Войти' }}</button>
+
+      <div class="or" role="separator"><span>или</span></div>
+
+      <a v-if="SSO_CENTRINVEST_URL" class="btn submit" :href="SSO_CENTRINVEST_URL"><Landmark />Войти через Центр-инвест</a>
+      <button v-else type="button" class="btn submit sso-off" disabled aria-describedby="sso-note">
+        <Landmark />Войти через Центр-инвест <span class="chip">скоро</span>
+      </button>
+      <p v-if="!SSO_CENTRINVEST_URL" id="sso-note" class="tiny sso-note">Вход через банк подключим, как только его откроет банк.</p>
+
+      <p class="foot-link">Нет аккаунта? <RouterLink to="/register">Зарегистрироваться</RouterLink></p>
     </form>
   </AuthLayout>
 </template>
+
+<style scoped>
+.form-error { margin: -4px 0 16px; }
+.or { display: flex; align-items: center; gap: 12px; margin: 20px 0; color: var(--ink-3); font-size: 14px; }
+.or::before, .or::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+.sso-off { opacity: 1; color: var(--ink-3); background: var(--surface-2); border-color: var(--line); }
+.sso-note { text-align: center; margin-top: 8px; }
+</style>

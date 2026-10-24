@@ -1,76 +1,135 @@
 <script setup lang="ts">
-// Оболочка вкладок компании. Дашборд грузится один раз и раздаётся вкладкам через provide/inject;
-// после любого действия (событие, выписка, категория) вкладка вызывает reload().
-import { provide, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
-import { api, ApiError, type Company, type Dashboard } from '../api'
+// Оболочка компании. Дашборд грузится один раз и раздаётся вкладкам через provide/inject;
+// после любого действия (событие, выписка, категория, вложение) вкладка вызывает reload().
+import { ChevronLeft, LogOut, MessageCircle } from 'lucide-vue-next'
+import { computed, onBeforeUnmount, provide, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { api, ApiError, logout, type Company, type Dashboard } from '../api'
+import AppLogo from '../components/AppLogo.vue'
 import AssistantPanel from '../components/AssistantPanel.vue'
 
 const route = useRoute()
+const router = useRouter()
 const dashboard = ref<Dashboard | null>(null)
 const company = ref<Company | null>(null)
 const emptyHistory = ref(false)
 const error = ref('')
 const assistantOpen = ref(false)
+const toastText = ref('')
+let toastTimer: number | undefined
+let reloadSeq = 0
+onBeforeUnmount(() => { ++reloadSeq; window.clearTimeout(toastTimer) })
 
 async function reload() {
+  const seq = ++reloadSeq
+  const id = route.params.id as string
   error.value = ''
-  dashboard.value = null
   emptyHistory.value = false
   try {
-    company.value = await api.company(route.params.id as string)
-    dashboard.value = await api.dashboard(route.params.id as string)
+    const currentCompany = await api.company(id)
+    if (seq !== reloadSeq) return
+    company.value = currentCompany
+    const currentDashboard = await api.dashboard(id)
+    if (seq === reloadSeq) dashboard.value = currentDashboard
   } catch (e) {
+    if (seq !== reloadSeq) return
+    dashboard.value = null
     if (e instanceof ApiError && e.status === 409) emptyHistory.value = true
     else error.value = e instanceof ApiError ? e.message : 'Не удалось загрузить прогноз'
   }
+}
+
+function toast(text: string) {
+  toastText.value = text
+  window.clearTimeout(toastTimer)
+  toastTimer = window.setTimeout(() => (toastText.value = ''), 4000)
 }
 
 provide('dashboard', dashboard)
 provide('company', company)
 provide('emptyHistory', emptyHistory)
 provide('reload', reload)
-watch(() => route.params.id, reload, { immediate: true })
+provide('toast', toast)
+watch(() => route.params.id, () => { dashboard.value = null; company.value = null; assistantOpen.value = false; reload() }, { immediate: true })
 
+const base = computed(() => `/companies/${route.params.id}`)
 const tabs = [
-  { to: '', label: 'Прогноз' },
-  { to: 'scenarios', label: 'Что если' },
+  { to: '', label: 'Главная' },
   { to: 'operations', label: 'Операции' },
+  { to: 'scenarios', label: 'Сценарии' },
   { to: 'plan-fact', label: 'План-факт' },
   { to: 'sources', label: 'Источники' },
 ]
+const isActive = (to: string) => route.path.replace(/\/$/, '') === (to ? `${base.value}/${to}` : base.value)
+
+function signOut() {
+  logout()
+  router.push('/login')
+}
 </script>
 
 <template>
   <div class="shell">
     <header class="top">
-      <RouterLink to="/companies" class="back">← Компании</RouterLink>
-      <h1 v-if="company">{{ company.name }}</h1>
-      <nav class="tabs" aria-label="Разделы компании">
-        <RouterLink v-for="t in tabs" :key="t.to" :to="`/companies/${route.params.id}/${t.to}`"
-                    :class="{ active: route.path.replace(/\/$/, '') === `/companies/${route.params.id}${t.to ? '/' + t.to : ''}` }">
-          {{ t.label }}
-        </RouterLink>
-      </nav>
+      <div class="bar">
+        <RouterLink to="/companies" class="home" aria-label="Все компании"><AppLogo /></RouterLink>
+        <nav class="tabs" aria-label="Разделы">
+          <RouterLink v-for="t in tabs" :key="t.to" :to="t.to ? `${base}/${t.to}` : base"
+                      :aria-current="isActive(t.to) ? 'page' : undefined">{{ t.label }}</RouterLink>
+        </nav>
+        <div class="right">
+          <button class="btn btn-sm" @click="assistantOpen = true"><MessageCircle />Спросить</button>
+          <button class="btn btn-ghost btn-icon" aria-label="Выйти" title="Выйти" @click="signOut"><LogOut /></button>
+        </div>
+      </div>
     </header>
-    <p v-if="error" class="error page" role="alert">{{ error }}</p>
-    <p v-if="emptyHistory" class="empty">Для прогноза нужна история платежей.
-      <RouterLink :to="`/companies/${route.params.id}/operations`">Добавьте платёж или загрузите выписку</RouterLink>.
-    </p>
-    <main class="page"><RouterView /></main>
-    <button class="ask btn btn-primary" @click="assistantOpen = true">Спросить</button>
+
+    <div class="page">
+      <div class="crumbs">
+        <RouterLink to="/companies" class="back"><ChevronLeft />Все компании</RouterLink>
+        <span v-if="company" class="company">{{ company.name }}</span>
+      </div>
+      <p v-if="error" class="error banner" role="alert">{{ error }}</p>
+      <div v-if="emptyHistory && !isActive('operations') && !isActive('sources')" class="card empty">
+        <h2>Для прогноза нужна история платежей</h2>
+        <p class="muted">Загрузите банковскую выписку или добавьте проведённый платёж вручную.</p>
+        <RouterLink class="btn btn-primary" :to="`${base}/operations`">Перейти к операциям</RouterLink>
+      </div>
+      <RouterView v-else :key="route.params.id as string" />
+    </div>
+
     <AssistantPanel v-if="assistantOpen" :company-id="route.params.id as string" @close="assistantOpen = false" />
+    <p v-if="toastText" class="toast" role="status">{{ toastText }}</p>
   </div>
 </template>
 
 <style scoped>
-.top { background: var(--surface); border-bottom: 1px solid var(--line); padding: 12px 16px 0; }
-.empty { max-width: 1180px; margin: 20px auto 0; padding: 0 16px; color: var(--ink-2); }
-.back { color: var(--ink-2); text-decoration: none; font-size: 14px; }
-h1 { font-size: 20px; margin: 4px 0 8px; }
-.tabs { display: flex; gap: 4px; overflow-x: auto; }
-.tabs a { padding: 8px 12px; text-decoration: none; color: var(--ink-2); border-bottom: 2px solid transparent; white-space: nowrap; }
-.tabs a.active { color: var(--ink); border-color: var(--green); font-weight: 500; }
-.page { max-width: 1180px; margin: 0 auto; padding: 24px 16px 96px; }
-.ask { position: fixed; right: 20px; bottom: 20px; border-radius: 999px; padding: 12px 20px; box-shadow: 0 4px 16px rgb(15 123 87 / 0.25); }
+.top { position: sticky; top: 0; z-index: 30; background: var(--surface); border-bottom: 1px solid var(--line); }
+.bar { max-width: var(--page); margin: 0 auto; padding: 0 24px; height: 64px; display: flex; align-items: center; gap: 32px; }
+.home { text-decoration: none; flex: none; }
+.tabs { display: flex; gap: 4px; height: 100%; overflow-x: auto; scrollbar-width: none; }
+.tabs a {
+  display: flex; align-items: center; padding: 0 12px; height: 100%; text-decoration: none; color: var(--ink-2);
+  font-weight: 550; font-size: 15px; border-bottom: 2px solid transparent; white-space: nowrap;
+}
+.tabs a:hover { color: var(--ink); }
+.tabs a[aria-current='page'] { color: var(--ink); border-bottom-color: var(--brand); }
+.right { margin-left: auto; display: flex; gap: 4px; align-items: center; flex: none; }
+.page { max-width: var(--page); margin: 0 auto; padding: 20px 24px 64px; }
+.crumbs { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; font-size: 14px; color: var(--ink-2); flex-wrap: wrap; }
+.back { display: inline-flex; align-items: center; gap: 2px; color: var(--ink-2); text-decoration: none; }
+.back svg { width: 16px; height: 16px; }
+.back:hover { color: var(--ink); }
+.company { font-weight: 600; color: var(--ink); padding-left: 12px; border-left: 1px solid var(--line); }
+.banner { margin-bottom: 16px; }
+.empty { display: grid; gap: 12px; justify-items: start; }
+@media (max-width: 900px) {
+  .bar { height: auto; flex-wrap: wrap; gap: 0 12px; padding: 0 16px; }
+  .home { padding: 12px 0; }
+  .tabs { order: 3; width: 100%; height: 44px; margin: 0 -12px; }
+  .page { padding: 16px 16px 48px; }
+}
+@media (max-width: 480px) {
+  .home :deep(.word) { display: none; }
+}
 </style>

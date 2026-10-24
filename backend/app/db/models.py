@@ -16,11 +16,13 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Index,
+    LargeBinary,
     Numeric,
     String,
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -137,6 +139,31 @@ class Operation(Base):
                                               create_constraint=True, length=10), default="ok")
 
     company: Mapped[Company] = relationship(back_populates="operations")
+
+
+class OperationAttachment(Base):
+    __tablename__ = 'operation_attachments'
+    __table_args__ = (
+        CheckConstraint('size_bytes > 0 AND size_bytes <= 10485760', name='ck_attachment_size'),
+        Index('uq_operation_receipt', 'operation_id', unique=True,
+              sqlite_where=text("kind = 'receipt'"), postgresql_where=text("kind = 'receipt'")),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid7)
+    operation_id: Mapped[str] = mapped_column(ForeignKey('operations.id', ondelete='CASCADE'), index=True)
+    kind: Mapped[str] = mapped_column(Enum('receipt', 'related', name='attachment_kind', native_enum=False,
+                                         create_constraint=True, length=7))
+    filename: Mapped[str] = mapped_column(String(255))
+    content_type: Mapped[str] = mapped_column(String(128))
+    size_bytes: Mapped[int]
+    # Список документов и прогнозы не загружают содержимое файлов.
+    content: Mapped[bytes] = mapped_column(LargeBinary, deferred=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    @property
+    def previewable(self) -> bool:
+        from app.domain.attachments import PREVIEW_TYPES
+        return self.content_type in PREVIEW_TYPES
 
 
 class PlannedEvent(Base):

@@ -1,8 +1,12 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+// Список компаний. Для нового пользователя главный экран — «Нужна одна загрузка»: файл выписки → компания → прогноз.
+import { ArrowRight, Building2, LogOut, Plus } from 'lucide-vue-next'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { api, type Company } from '../api'
+import { api, ApiError, logout, type Company, type ImportResult } from '../api'
+import AppLogo from '../components/AppLogo.vue'
 import StatementUpload from '../components/StatementUpload.vue'
+import { plural } from '../format'
 
 const companies = ref<Company[]>([])
 const loading = ref(true)
@@ -10,62 +14,120 @@ const error = ref('')
 const creating = ref(false)
 const busy = ref(false)
 const name = ref('')
+const importResults = ref<ImportResult[]>([])
+const imported = computed(() => importResults.value[0] ?? null)
+const importTotal = computed(() => importResults.value.reduce((sum, item) => sum + item.rows_total, 0))
+const rejected = computed(() => importResults.value.reduce((sum, item) => sum + item.quality.rows_rejected, 0))
+const duplicates = computed(() => importResults.value.reduce((sum, item) => sum + item.quality.duplicates, 0))
+const importWarnings = computed(() => [...new Set(importResults.value.flatMap((item) => item.quality.warnings))])
+let redirectTimer: number | undefined
+onBeforeUnmount(() => window.clearTimeout(redirectTimer))
 const router = useRouter()
 
 onMounted(async () => {
-  try { companies.value = await api.companies() } catch (e) { error.value = (e as Error).message } finally { loading.value = false }
+  try { companies.value = await api.companies() } catch (e) { error.value = e instanceof ApiError ? e.message : 'Не удалось загрузить компании' }
+  finally { loading.value = false }
 })
 
 async function create() {
-  if (busy.value) return
+  if (busy.value || !name.value.trim()) return
   busy.value = true
   error.value = ''
-  try {
-    const company = await api.createCompany(name.value)
-    router.push(`/companies/${company.id}/operations`)
-  } catch (e) {
-    error.value = (e as Error).message
-  } finally {
-    busy.value = false
+  try { const c = await api.createCompany(name.value.trim()); router.push(`/companies/${c.id}/operations`) }
+  catch (e) { error.value = e instanceof ApiError ? e.message : 'Не удалось создать компанию' }
+  finally { busy.value = false }
+}
+
+// Короткая пауза на экране «что нашли», чтобы человек увидел: сервис уже разобрал его выписку сам.
+function onImported(results: ImportResult[]) {
+  if (!results.length) return
+  importResults.value = results
+  companies.value = [...new Map([...companies.value, ...results.map((item) => item.company)].map((item) => [item.id, item])).values()]
+  if (results.length === 1 && !rejected.value) {
+    redirectTimer = window.setTimeout(() => router.push(`/companies/${results[0].company.id}`), 1600)
   }
 }
+function signOut() { logout(); router.push('/login') }
 </script>
 
 <template>
-  <main class="page">
-    <header class="head">
-      <h1>Мои компании</h1>
-      <button class="btn btn-primary" @click="creating = !creating">Добавить компанию</button>
+  <div class="wrap">
+    <header class="top">
+      <AppLogo />
+      <button class="btn btn-ghost btn-sm" @click="signOut"><LogOut />Выйти</button>
     </header>
-    <p v-if="error" class="error" role="alert">{{ error }}</p>
-    <form v-if="creating" class="card create" @submit.prevent="create">
-      <label class="field">Название компании <input v-model="name" maxlength="200" required autofocus /></label>
-      <button class="btn btn-primary" :disabled="busy">{{ busy ? 'Создаём…' : 'Создать компанию' }}</button>
-    </form>
-    <StatementUpload @imported="(results) => router.push(`/companies/${results[0].company.id}`)" />
-    <p v-if="loading">Загружаем…</p>
-    <section v-else-if="!companies.length" class="card empty">
-      <h2>Пока нет ни одной компании</h2>
-      <p>Создайте компанию для ручного ввода платежей или загрузите банковскую выписку — компания появится автоматически.</p>
-    </section>
-    <ul v-else class="grid">
-      <li v-for="c in companies" :key="c.id">
-        <RouterLink :to="`/companies/${c.id}`" class="card company">
-          <strong>{{ c.name }}</strong>
-          <span class="muted">{{ c.industry || 'Отрасль не указана' }}</span>
-        </RouterLink>
-      </li>
-    </ul>
-  </main>
+
+    <main class="page">
+      <section v-if="imported" class="card found" role="status">
+        <p class="f-label">Выписка разобрана</p>
+        <h1>{{ importResults.length === 1 ? imported.company.name : `Компаний в выписке: ${importResults.length}` }}</h1>
+        <ul class="facts">
+          <li><b class="num">{{ importTotal.toLocaleString('ru-RU') }}</b> {{ plural(importTotal, 'операция', 'операции', 'операций') }}</li>
+          <li v-if="importResults.length === 1"><b class="num">{{ imported.quality.history_working_days }}</b> рабочих {{ plural(imported.quality.history_working_days, 'день', 'дня', 'дней') }} истории</li>
+          <li v-if="duplicates"><b class="num">{{ duplicates }}</b> {{ plural(duplicates, 'дубль убран', 'дубля убрано', 'дублей убрано') }}</li>
+        </ul>
+        <p v-if="rejected" class="error" role="alert">Строк с ошибками пропущено: {{ rejected }}. Проверьте исходный файл.</p>
+        <p v-for="warning in importWarnings" :key="warning" class="small muted">{{ warning }}</p>
+        <p v-if="importResults.length === 1 && !rejected" class="muted">Строим прогноз…</p>
+        <template v-else>
+          <RouterLink v-for="item in importResults" :key="item.company.id" class="btn" :to="`/companies/${item.company.id}`">{{ item.company.name }} — перейти к прогнозу</RouterLink>
+          <button class="btn btn-ghost" @click="importResults = []">К списку компаний</button>
+        </template>
+      </section>
+
+      <template v-else>
+        <div class="head">
+          <h1>{{ companies.length ? 'Ваши компании' : 'Нужна одна загрузка' }}</h1>
+          <p class="muted">{{ companies.length ? 'Выберите компанию или загрузите выписку новой.' : 'Загрузите выписку по расчётному счёту: сервис сам разложит платежи по категориям, найдёт регулярные и построит прогноз.' }}</p>
+        </div>
+        <p v-if="error" class="error" role="alert">{{ error }}</p>
+
+        <ul v-if="companies.length" class="list">
+          <li v-for="c in companies" :key="c.id">
+            <RouterLink :to="`/companies/${c.id}`" class="card company">
+              <Building2 class="c-ico" aria-hidden="true" />
+              <span class="c-main"><b>{{ c.name }}</b><span class="tiny">{{ c.industry || 'Отрасль не указана' }}</span></span>
+              <ArrowRight class="c-go" aria-hidden="true" />
+            </RouterLink>
+          </li>
+        </ul>
+
+        <StatementUpload variant="zone" @imported="onImported" />
+
+        <div class="manual">
+          <button v-if="!creating" class="btn btn-ghost" @click="creating = true"><Plus />Нет выписки? Создать компанию и вводить платежи вручную</button>
+          <form v-else class="card create" @submit.prevent="create">
+            <label class="field">Название компании <input v-model="name" maxlength="200" required autofocus /></label>
+            <div class="row">
+              <button type="button" class="btn" @click="creating = false">Отмена</button>
+              <button class="btn btn-primary" :disabled="busy || !name.trim()">{{ busy ? 'Создаём…' : 'Создать' }}</button>
+            </div>
+          </form>
+        </div>
+        <p v-if="loading" class="tiny">Загружаем…</p>
+      </template>
+    </main>
+  </div>
 </template>
 
 <style scoped>
-.page { max-width: 960px; margin: 0 auto; padding: 32px 16px; }
-.head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 24px; }
-.grid { list-style: none; padding: 0; display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
-.company { display: grid; gap: 4px; text-decoration: none; color: inherit; }
-.company:hover { border-color: var(--green); }
-.muted { color: var(--muted); font-size: 14px; }
-.empty p { color: var(--ink-2); }
-.create { margin-bottom: 20px; max-width: 420px; }
+.top { max-width: 880px; margin: 0 auto; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+.page { max-width: 880px; margin: 0 auto; padding: 24px 24px 64px; display: grid; gap: 20px; }
+.head { display: grid; gap: 8px; }
+.head h1 { font-size: 32px; }
+.head p { max-width: 60ch; }
+.list { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.company { display: flex; align-items: center; gap: 16px; padding: 16px 20px; text-decoration: none; color: inherit; transition: border-color 150ms; }
+.company:hover { border-color: var(--brand); }
+.c-ico { width: 22px; height: 22px; color: var(--brand); flex: none; }
+.c-main { flex: 1; display: grid; }
+.c-go { width: 18px; height: 18px; color: var(--ink-3); }
+.manual { display: grid; justify-items: start; }
+.create { width: min(420px, 100%); }
+.row { display: flex; gap: 8px; justify-content: flex-end; }
+.found { display: grid; gap: 12px; padding: 32px; }
+.f-label { color: var(--brand); font-weight: 600; font-size: 14px; }
+.facts { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 18px; }
+.facts b { font-size: 28px; letter-spacing: -0.02em; }
+@media (max-width: 640px) { .top, .page { padding-left: 16px; padding-right: 16px; } .head h1 { font-size: 26px; } }
 </style>

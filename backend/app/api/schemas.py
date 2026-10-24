@@ -2,7 +2,7 @@
 через PATCH нельзя подсунуть owner_id или data_version."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
@@ -107,6 +107,18 @@ class OperationOut(BaseModel):
     counterparty_inn: str | None
     balance_eod: Decimal
     source: Literal["manual", "statement"]
+
+
+class AttachmentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    operation_id: str
+    kind: Literal['receipt', 'related']
+    filename: str
+    content_type: str
+    size_bytes: int
+    previewable: bool
+    created_at: datetime
 
 
 class PaymentIn(_In):

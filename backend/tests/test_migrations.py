@@ -2,6 +2,7 @@
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
 
 from app.core.config import Settings
@@ -61,7 +62,7 @@ def test_adopt_create_all_database_without_migration_history(tmp_path, monkeypat
     command.upgrade(config, "head")  # повторный запуск обычный, без повторной миграции и переименования
     assert {"user_emails", "forecast_runs", "forecast_points"}.issubset(inspect(engine).get_table_names())
     with engine.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "b872c30a951e"
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == ScriptDirectory.from_config(config).get_current_head()
         assert connection.scalar(text("SELECT password_hash FROM users WHERE id='old'")) == "saved-hash"
         assert connection.scalar(text("SELECT name FROM companies WHERE id='company'")) == "Legacy"
         assert float(connection.scalar(text("SELECT amount FROM operations WHERE id='op'"))) == 1.25

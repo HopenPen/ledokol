@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.security import decode_access_token
-from app.db.models import Company, User
+from app.db.models import Company, Operation, OperationAttachment, User
 from app.db.session import get_session
 
 _bearer = HTTPBearer(auto_error=False)
@@ -40,3 +40,23 @@ def owned_company(company_id: str, session: DbSession, user: CurrentUser) -> Com
 
 
 OwnedCompany = Annotated[Company, Depends(owned_company)]
+
+
+def owned_operation(operation_id: str, session: DbSession, user: CurrentUser) -> Operation:
+    operation = session.scalar(select(Operation).join(Company).where(
+        Operation.id == operation_id, Company.owner_id == user.id))
+    if operation is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, 'Операция не найдена')
+    return operation
+
+
+def owned_attachment(attachment_id: str, session: DbSession, user: CurrentUser) -> OperationAttachment:
+    attachment = session.scalar(select(OperationAttachment).join(Operation).join(Company).where(
+        OperationAttachment.id == attachment_id, Company.owner_id == user.id))
+    if attachment is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, 'Файл не найден')
+    return attachment
+
+
+OwnedOperation = Annotated[Operation, Depends(owned_operation)]
+OwnedAttachment = Annotated[OperationAttachment, Depends(owned_attachment)]
