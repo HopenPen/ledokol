@@ -1,0 +1,82 @@
+# Отдельный серверный compose: наружу доступен только nginx на хосте.
+name: ledokol
+
+x-runtime: &runtime
+  restart: unless-stopped
+  logging:
+    driver: local
+    options: { max-size: "10m", max-file: "3" }
+
+services:
+  api:
+    <<: *runtime
+    image: ledokol-api:${RELEASE_SHA:?Set RELEASE_SHA}
+    build: ../backend
+    env_file: [../backend/mailpit.env, /opt/ledokol/shared/app.env]
+    environment:
+      CASHFLOW_DATABASE_URL: postgresql+psycopg://cashflow:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/cashflow
+      CASHFLOW_ONEC_BASE_URL: http://onec:8101
+      CASHFLOW_FNS_BASE_URL: http://fns:8102
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 30s
+    depends_on:
+      db: { condition: service_healthy }
+      onec: { condition: service_started }
+      fns: { condition: service_started }
+      mailpit: { condition: service_started }
+
+  web:
+    <<: *runtime
+    image: ledokol-web:${RELEASE_SHA:?Set RELEASE_SHA}
+    build: ../frontend
+    ports: ["127.0.0.1:8080:80"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/meta/categories"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    depends_on:
+      api: { condition: service_healthy }
+
+  db:
+    <<: *runtime
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: cashflow
+      POSTGRES_DB: cashflow
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cashflow -d cashflow"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+
+  onec:
+    <<: *runtime
+    image: ledokol-mocks:${RELEASE_SHA:?Set RELEASE_SHA}
+    build: ../mocks
+    command: uvicorn onec_mock:app --host 0.0.0.0 --port 8101
+    environment:
+      MOCK_DATA_DIR: /data/statements
+      MOCK_TOKEN: ${MOCK_TOKEN:?Set MOCK_TOKEN}
+    volumes: [/opt/ledokol/shared/data:/data:ro]
+
+  fns:
+    <<: *runtime
+    image: ledokol-mocks:${RELEASE_SHA:?Set RELEASE_SHA}
+    command: uvicorn fns_mock:app --host 0.0.0.0 --port 8102
+    environment:
+      MOCK_TOKEN: ${MOCK_TOKEN:?Set MOCK_TOKEN}
+
+  mailpit:
+    <<: *runtime
+    image: axllent/mailpit:v1.27.4
+    ports: ["127.0.0.1:8025:8025", "127.0.0.1:1025:1025"]
+
+volumes:
+  pgdata:
