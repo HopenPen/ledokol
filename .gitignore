@@ -218,3 +218,15 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- проект ---
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+*.db
+backend/demo/
+backend/models/
+.out/
+data/
+results/
+backtest/
