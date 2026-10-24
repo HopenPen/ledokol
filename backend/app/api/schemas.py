@@ -72,6 +72,23 @@ class CompanyCreate(_In):
     name: str = Field(min_length=1, max_length=200)
 
 
+class InitialBalanceIn(_In):
+    date: date
+    amount: Decimal = Field(max_digits=16, decimal_places=2)
+
+
+class BalanceOut(BaseModel):
+    amount: Decimal | None
+    as_of: date | None
+    source: Literal["unknown", "initial", "statement", "legacy", "calculated"]
+    anchor_date: date | None
+    anchor_source: Literal["initial", "statement", "legacy"] | None
+    initial_date: date | None
+    initial_amount: Decimal | None
+    first_operation_date: date | None
+    unknown_operations: int
+
+
 class QualityOut(BaseModel):
     rows_rejected: int = 0
     rows_total: int
@@ -87,6 +104,7 @@ class ImportOut(BaseModel):
     company: CompanyOut
     rows_total: int
     rows_new: int
+    rows_matched: int = 0
     already_imported: bool
     quality: QualityOut
 
@@ -105,7 +123,7 @@ class OperationOut(BaseModel):
     category_source: str
     quality: str
     counterparty_inn: str | None
-    balance_eod: Decimal
+    balance_eod: Decimal | None
     source: Literal["manual", "statement"]
 
 
@@ -128,7 +146,7 @@ class PaymentIn(_In):
     counterparty_name: str = Field(min_length=1, max_length=300)
     counterparty_inn: str = Field(default="", pattern=r"^(?:\d{10}|\d{12})?$")
     purpose: str = Field(min_length=1, max_length=2000)
-    balance_eod: Decimal = Field(max_digits=16, decimal_places=2)
+    balance_eod: Decimal | None = Field(default=None, max_digits=16, decimal_places=2, deprecated=True)
 
     @field_validator("op_date")
     @classmethod

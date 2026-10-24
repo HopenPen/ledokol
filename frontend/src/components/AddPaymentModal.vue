@@ -17,7 +17,6 @@ const amount = ref('')
 const name = ref('')
 const inn = ref('')
 const purpose = ref('')
-const balance = ref('')
 const receipt = ref<File[]>([])
 const related = ref<File[]>([])
 const busy = ref(false)
@@ -35,7 +34,6 @@ async function save() {
     const op = await api.addPayment(props.companyId, {
       op_date: opDate.value, amount: String(amount.value), direction: direction.value,
       counterparty_name: name.value.trim(), counterparty_inn: inn.value.trim(), purpose: purpose.value.trim(),
-      balance_eod: String(balance.value),
     }, key)
     let warning = ''
     try {
@@ -78,10 +76,7 @@ async function save() {
             <input v-model="inn" inputmode="numeric" pattern="(?:\d{10}|\d{12})?" maxlength="12" />
           </label>
           <label class="field">Назначение платежа <input v-model="purpose" maxlength="2000" required /></label>
-          <label class="field">Остаток на счёте в конце этого дня, ₽
-            <input v-model="balance" type="number" inputmode="decimal" min="-99999999999999.99" max="99999999999999.99" step="0.01" required />
-            <span class="hint">Применяется ко всем операциям этого дня</span>
-          </label>
+          <p class="small muted">Остаток пересчитается автоматически. Если он пока неизвестен, начальную сумму можно указать отдельно в «Источниках».</p>
           <div class="files">
             <FilePicker v-model="receipt" label="Чек" hint="Чек или платёжное поручение, один файл. Необязательно" />
             <FilePicker v-model="related" multiple label="Сопутствующие файлы" hint="Акт, договор, накладная. Необязательно" />

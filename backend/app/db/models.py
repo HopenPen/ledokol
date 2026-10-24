@@ -111,6 +111,21 @@ class ManualPaymentRequest(Base):
     operation_id: Mapped[str] = mapped_column(ForeignKey("operations.id", ondelete="CASCADE"), unique=True)
 
 
+class BalancePoint(Base):
+    """Опорные суммы хранятся отдельно от рассчитываемого остатка операции."""
+    __tablename__ = "balance_points"
+    __table_args__ = (
+        Index("uq_company_initial_balance", "company_id", unique=True,
+              sqlite_where=text("kind = 'initial'"), postgresql_where=text("kind = 'initial'")),
+    )
+
+    company_id: Mapped[str] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), primary_key=True)
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    kind: Mapped[str] = mapped_column(Enum("initial", "statement", "legacy", name="balance_kind", native_enum=False,
+                                         create_constraint=True, length=9), primary_key=True)
+    amount: Mapped[Decimal] = mapped_column(Money)
+
+
 class Operation(Base):
     __tablename__ = "operations"
     __table_args__ = (
@@ -129,7 +144,7 @@ class Operation(Base):
     counterparty_inn: Mapped[str | None] = mapped_column(String(12))
     counterparty_name: Mapped[str] = mapped_column(Text)
     purpose: Mapped[str] = mapped_column(Text, default="")  # ПДн возможны: не логируется, в LLM не уходит
-    balance_eod: Mapped[Decimal] = mapped_column(Money)
+    balance_eod: Mapped[Decimal | None] = mapped_column(Money)
     category: Mapped[str] = mapped_column(String(32), default="unknown")
     category_source: Mapped[str] = mapped_column(Enum("rule", "counterparty", "ml", "user", "none", name="category_source",
                                                       native_enum=False, create_constraint=True, length=12),

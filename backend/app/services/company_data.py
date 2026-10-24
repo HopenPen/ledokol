@@ -21,7 +21,7 @@ def load_operations_frame(session: Session, company: Company, *, with_rows: bool
         "counterparty_inn": [r.counterparty_inn or "" for r in rows],
         "counterparty_name": [r.counterparty_name for r in rows],
         "payment_purpose": [r.purpose for r in rows],
-        "balance_eod": [float(r.balance_eod) for r in rows],
+        "balance_eod": [float(r.balance_eod) if r.balance_eod is not None else np.nan for r in rows],
         "db_id": [r.id for r in rows],
         "user_category": [r.category if r.category_source == "user" else None for r in rows],
     })

@@ -4,8 +4,9 @@ import type { ImportResult } from './api'
 export function importSummary(results: ImportResult[]): string {
   const added = results.reduce((sum, result) => sum + result.rows_new, 0)
   const rejected = results.reduce((sum, result) => sum + result.quality.rows_rejected, 0)
+  const matched = results.reduce((sum, result) => sum + result.rows_matched, 0)
   const message = results.every((result) => result.already_imported)
-    ? 'Эта выписка уже загружена' : `Добавлено операций: ${added}. Прогноз обновлён`
+    ? 'Эта выписка уже загружена' : `Добавлено операций: ${added}${matched ? `. Подтверждено ручных платежей: ${matched}` : ''}. Прогноз обновлён`
   return rejected ? `${message}. Строк с ошибками пропущено: ${rejected}` : message
 }
 
@@ -71,6 +72,11 @@ export const SOURCE_LABEL: Record<string, string> = {
 export const CATEGORY_SOURCE: Record<string, string> = {
   rule: 'по правилу из назначения платежа', counterparty: 'по истории этого контрагента', ml: 'моделью по тексту',
   user: 'вы исправили вручную', none: 'не определена',
+}
+
+export const BALANCE_SOURCE: Record<string, string> = {
+  statement: 'Подтверждён выпиской', calculated: 'Рассчитан с учётом ручных операций',
+  initial: 'Начальный остаток', legacy: 'Ранее введён вручную', unknown: 'Неизвестен',
 }
 
 export function chanceWords(p: number): string {

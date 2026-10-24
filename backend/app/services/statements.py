@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections import defaultdict
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -11,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.db.models import BankAccount, Company, Operation, StatementImport, User
 from app.domain.ingest import QualityReport, StatementFormatError
 from app.importers import ParsedImport, parse_statement
+from app.services.balances import lock_company, set_point
 from app.services.history import refresh_history
 
 
@@ -21,6 +23,7 @@ class ImportResult:
     rows_new: int
     already_imported: bool
     quality: QualityReport
+    rows_matched: int = 0
 
 
 def import_statement(session: Session, user: User, raw: bytes, company: Company | None = None,
@@ -39,6 +42,7 @@ def import_statement(session: Session, user: User, raw: bytes, company: Company 
                 else:
                     continue
             target = _target(session, user, external, parsed, company)
+            lock_company(session, target)
             journal = session.scalar(select(StatementImport).where(StatementImport.company_id == target.id,
                                                                    StatementImport.sha256 == digest))
             if journal:
@@ -46,19 +50,14 @@ def import_statement(session: Session, user: User, raw: bytes, company: Company 
                 continue
             existing = set(session.scalars(select(Operation.source_operation_id).where(Operation.company_id == target.id)))
             fresh = part[~part["operation_id"].isin(existing)].drop_duplicates("operation_id")
-            for day, day_rows in fresh.groupby("operation_date"):
-                session.execute(update(Operation).where(Operation.company_id == target.id, Operation.op_date == day.date())
-                                .values(balance_eod=Decimal(str(day_rows.iloc[0]["balance_eod"]))))
-            session.add_all([Operation(
-                company_id=target.id, source_operation_id=r.operation_id, op_date=r.operation_date.date(),
-                amount=Decimal(str(r.amount)), direction=r.direction, counterparty_inn=r.counterparty_inn or None,
-                counterparty_name=r.counterparty_name, purpose=r.payment_purpose, balance_eod=Decimal(str(r.balance_eod)))
-                for r in fresh.itertuples(index=False)])
+            for day, day_rows in part.groupby("operation_date"):
+                set_point(session, target, day.date(), Decimal(str(day_rows.iloc[0]["balance_eod"])), "statement")
+            created, matched = _merge_operations(session, target, fresh)
             session.flush()
             quality = refresh_history(session, target)
-            session.add(StatementImport(company_id=target.id, sha256=digest, rows_total=len(part), rows_new=len(fresh)))
+            session.add(StatementImport(company_id=target.id, sha256=digest, rows_total=len(part), rows_new=created))
             session.execute(update(Company).where(Company.id == target.id).values(data_version=Company.data_version + 1))
-            results.append(ImportResult(target, len(part), len(fresh), False, quality))
+            results.append(ImportResult(target, len(part), created, False, quality, matched))
         if not results:
             raise StatementFormatError("В файле нет платежей выбранной компании")
         rejected = int(parsed.frame.attrs.get("rows_rejected", 0))
@@ -74,6 +73,56 @@ def import_statement(session: Session, user: User, raw: bytes, company: Company 
     except Exception:
         session.rollback()
         raise
+
+
+def _normalize(value):
+    return " ".join(str(value or "").casefold().split())
+
+
+def _signature(day, amount, direction, purpose):
+    return day, Decimal(str(amount)), direction, _normalize(purpose)
+
+
+def _same_counterparty(inn_a, name_a, inn_b, name_b):
+    return inn_a == inn_b if inn_a and inn_b else _normalize(name_a) == _normalize(name_b)
+
+
+def _merge_operations(session: Session, company: Company, fresh) -> tuple[int, int]:
+    """Точное совпадение факта с выпиской подтверждает существующую карточку вместе с файлами."""
+    manual = defaultdict(list)
+    for op in session.scalars(select(Operation).where(Operation.company_id == company.id,
+                                                      Operation.source_operation_id.startswith("manual:"))
+                             .order_by(Operation.source_operation_id)):
+        manual[_signature(op.op_date, op.amount, op.direction, op.purpose)].append(op)
+    incoming = defaultdict(list)
+    for row in fresh.itertuples(index=False):
+        incoming[_signature(row.operation_date.date(), row.amount, row.direction, row.payment_purpose)].append(row)
+    created = matched = 0
+    for signature, rows in incoming.items():
+        available = manual.get(signature, []).copy()
+        for index, row in enumerate(rows):
+            candidates = [op for op in available if _same_counterparty(
+                op.counterparty_inn, op.counterparty_name, row.counterparty_inn, row.counterparty_name)]
+            remaining = [r for r in rows[index:] if _same_counterparty(
+                r.counterparty_inn, r.counterparty_name, row.counterparty_inn, row.counterparty_name)]
+            if len(candidates) > len(remaining):
+                raise StatementFormatError("В выписке найден платёж, которому соответствуют несколько одинаковых ручных платежей. "
+                                           "Загрузите полную выписку за этот день для однозначной сверки.")
+            if candidates:
+                operation = candidates[0]
+                available.remove(operation)
+                matched += 1
+            else:
+                operation = Operation(company_id=company.id)
+                session.add(operation)
+                created += 1
+            operation.source_operation_id = row.operation_id
+            operation.op_date = row.operation_date.date()
+            operation.amount, operation.direction = Decimal(str(row.amount)), row.direction
+            operation.counterparty_inn, operation.counterparty_name = row.counterparty_inn or None, row.counterparty_name
+            operation.purpose = row.payment_purpose
+            operation.balance_eod = Decimal(str(row.balance_eod))
+    return created, matched
 
 
 def _target(session: Session, user: User, external: str, parsed: ParsedImport, selected: Company | None) -> Company:

@@ -6,8 +6,22 @@ from sqlalchemy import select
 
 from app.api.deps import DbSession, OwnedCompany
 from app.api.schemas import (
-    AskIn, AskOut, CounterpartyCheckOut, DailyPlanFactOut, DayCompareOut, EventIn, EventOut, EventPatch, ForecastOut,
-    PlanFactRow, PreviewIn, RunOut, ScenarioDelta, ScenarioIn, ScenarioOut, SyncOut,
+    AskIn,
+    AskOut,
+    CounterpartyCheckOut,
+    DailyPlanFactOut,
+    DayCompareOut,
+    EventIn,
+    EventOut,
+    EventPatch,
+    ForecastOut,
+    PlanFactRow,
+    PreviewIn,
+    RunOut,
+    ScenarioDelta,
+    ScenarioIn,
+    ScenarioOut,
+    SyncOut,
 )
 from app.db.models import PlannedEvent as PlannedEventRow
 from app.domain.planfact import compare_daily, match_events
@@ -17,10 +31,17 @@ from app.integrations.http import IntegrationError
 from app.llm.assistant import ask
 from app.services.events import IdempotencyConflict, NewEvent, cancel_event, create_manual_event
 from app.services.forecasting import company_model, run_forecast, run_preview, to_domain_event
-from app.services.snapshots import runs_before
 from app.services.integrations import check_counterparties, sync_onec
+from app.services.snapshots import runs_before
 
 router = APIRouter(prefix="/companies/{company_id}", tags=["planning"])
+
+
+def _model(session, company):
+    try:
+        return company_model(session, company)
+    except LookupError:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Для прогноза нужны платежи и известный остаток. Проверьте «Источники».") from None
 
 
 # --- ручные события -------------------------------------------------------------------------------------------
@@ -74,7 +95,7 @@ def run_scenario(company: OwnedCompany, body: ScenarioIn, session: DbSession) ->
         base, _ = run_forecast(session, company)
         neg, _ = run_forecast(session, company, scenario=sc)
     except LookupError:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Сначала загрузите выписку") from None
+        raise HTTPException(status.HTTP_409_CONFLICT, "Для прогноза нужны платежи и известный остаток. Проверьте «Источники».") from None
     return ScenarioOut(base=ForecastOut.of(base), scenario=ForecastOut.of(neg), delta=_delta(base, neg))
 
 
@@ -97,13 +118,13 @@ def preview(company: OwnedCompany, body: PreviewIn, session: DbSession) -> Forec
         result = run_preview(session, company, exclude_db_ids=set(body.exclude_operation_ids),
                              extra_events=extra, scenario=_scenario(body), horizon=body.horizon)
     except LookupError:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Сначала загрузите выписку") from None
+        raise HTTPException(status.HTTP_409_CONFLICT, "Для прогноза нужны платежи и известный остаток. Проверьте «Источники».") from None
     return ForecastOut.of(result)
 
 
 def _delta(base: ForecastResult, neg: ForecastResult) -> ScenarioDelta:
-    first = lambda r: r.alerts[0].start if r.alerts else None  # noqa: E731
-    worst = lambda r: max((a.shortfall for a in r.alerts), default=0.0)  # noqa: E731
+    first = lambda r: r.alerts[0].start if r.alerts else None
+    worst = lambda r: max((a.shortfall for a in r.alerts), default=0.0)
     return ScenarioDelta(base_first_gap=first(base), scenario_first_gap=first(neg),
                          base_min_p50=min(p.p50 for p in base.points), scenario_min_p50=min(p.p50 for p in neg.points),
                          extra_shortfall=max(0.0, worst(neg) - worst(base)))
@@ -113,7 +134,7 @@ def _delta(base: ForecastResult, neg: ForecastResult) -> ScenarioDelta:
 @router.get("/plan-fact", response_model=list[PlanFactRow])
 def plan_fact(company: OwnedCompany, session: DbSession) -> list[PlanFactRow]:
     """Ожидаемые события, срок которых уже наступил по данным выписки: пришли / частично / не пришли."""
-    cm = company_model(session, company)
+    cm = _model(session, company)
     rows = list(session.scalars(select(PlannedEventRow).where(
         PlannedEventRow.company_id == company.id, PlannedEventRow.status.in_(["expected", "received", "partial", "missed"]),
         PlannedEventRow.event_date <= cm.fitted.as_of)))
@@ -132,7 +153,7 @@ def plan_fact(company: OwnedCompany, session: DbSession) -> list[PlanFactRow]:
 @router.get("/plan-fact/daily", response_model=DailyPlanFactOut)
 def plan_fact_daily(company: OwnedCompany, session: DbSession, run_id: str | None = None) -> DailyPlanFactOut:
     """График план-факт (звёздочка 2): прогноз, сделанный по прошлой выписке, против фактического остатка."""
-    cm = company_model(session, company)
+    cm = _model(session, company)
     runs = runs_before(session, company, cm.fitted.as_of)
     run = next((r for r in runs if r.id == run_id), None) if run_id else (runs[0] if runs else None)
     if run is None:
@@ -147,7 +168,7 @@ def plan_fact_daily(company: OwnedCompany, session: DbSession, run_id: str | Non
 # --- интеграции -----------------------------------------------------------------------------------------------
 @router.post("/sync/1c", response_model=SyncOut)
 def sync_1c(company: OwnedCompany, session: DbSession) -> SyncOut:
-    as_of = company_model(session, company).fitted.as_of
+    as_of = _model(session, company).fitted.as_of
     try:
         r = sync_onec(session, company, as_of)
     except IntegrationError:
@@ -168,7 +189,10 @@ def sync_fns(company: OwnedCompany, session: DbSession) -> list[CounterpartyChec
 # --- ассистент ------------------------------------------------------------------------------------------------
 @router.post("/assistant/ask", response_model=AskOut)
 def assistant_ask(company: OwnedCompany, body: AskIn, session: DbSession) -> AskOut:
-    result, _ = run_forecast(session, company)
+    try:
+        result, _ = run_forecast(session, company)
+    except LookupError:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Для ответа нужны платежи и известный остаток. Проверьте «Источники».") from None
     a = ask(result, body.question)
     return AskOut(answer=a.text, generated_by=a.generated_by)
 

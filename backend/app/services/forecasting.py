@@ -90,6 +90,8 @@ def company_model(session: Session, company: Company) -> CompanyModel:
     if frame.empty:
         raise LookupError("no_operations")
     prep = prepare_company(frame, get_classifier())
+    if prep.panel.empty:
+        raise LookupError("missing_balance")
     prep.ops = apply_user_categories(prep.ops)
     model = CompanyModel(prep=prep, fitted=fit(prep.ops, prep.panel))
     _cache.put(key, model)

@@ -4,7 +4,7 @@
 import { ChevronLeft, LogOut, MessageCircle } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, provide, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { api, ApiError, logout, type Company, type Dashboard } from '../api'
+import { api, ApiError, logout, type AccountBalance, type Company, type Dashboard } from '../api'
 import AppLogo from '../components/AppLogo.vue'
 import AssistantPanel from '../components/AssistantPanel.vue'
 
@@ -12,6 +12,7 @@ const route = useRoute()
 const router = useRouter()
 const dashboard = ref<Dashboard | null>(null)
 const company = ref<Company | null>(null)
+const balance = ref<AccountBalance | null>(null)
 const emptyHistory = ref(false)
 const error = ref('')
 const assistantOpen = ref(false)
@@ -26,9 +27,10 @@ async function reload() {
   error.value = ''
   emptyHistory.value = false
   try {
-    const currentCompany = await api.company(id)
+    const [currentCompany, currentBalance] = await Promise.all([api.company(id), api.balance(id)])
     if (seq !== reloadSeq) return
     company.value = currentCompany
+    balance.value = currentBalance
     const currentDashboard = await api.dashboard(id)
     if (seq === reloadSeq) dashboard.value = currentDashboard
   } catch (e) {
@@ -47,10 +49,11 @@ function toast(text: string) {
 
 provide('dashboard', dashboard)
 provide('company', company)
+provide('balance', balance)
 provide('emptyHistory', emptyHistory)
 provide('reload', reload)
 provide('toast', toast)
-watch(() => route.params.id, () => { dashboard.value = null; company.value = null; assistantOpen.value = false; reload() }, { immediate: true })
+watch(() => route.params.id, () => { dashboard.value = null; company.value = null; balance.value = null; assistantOpen.value = false; reload() }, { immediate: true })
 
 const base = computed(() => `/companies/${route.params.id}`)
 const tabs = [
@@ -91,9 +94,10 @@ function signOut() {
       </div>
       <p v-if="error" class="error banner" role="alert">{{ error }}</p>
       <div v-if="emptyHistory && !isActive('operations') && !isActive('sources')" class="card empty">
-        <h2>Для прогноза нужна история платежей</h2>
-        <p class="muted">Загрузите банковскую выписку или добавьте проведённый платёж вручную.</p>
+        <h2>{{ balance?.source === 'unknown' && balance.first_operation_date ? 'Для прогноза нужен начальный остаток' : 'Для прогноза нужна история платежей' }}</h2>
+        <p class="muted">Загрузите выписку или добавьте проведённые платежи и укажите начальный остаток в «Источниках».</p>
         <RouterLink class="btn btn-primary" :to="`${base}/operations`">Перейти к операциям</RouterLink>
+        <RouterLink class="btn" :to="`${base}/sources`">Настроить остаток</RouterLink>
       </div>
       <RouterView v-else :key="route.params.id as string" />
     </div>

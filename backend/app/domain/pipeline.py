@@ -21,7 +21,17 @@ def prepare_company(ops: pd.DataFrame, classifier: TextClassifier | None = None)
     company_ids = ops["company_id"].unique()
     if len(company_ids) != 1:
         raise ValueError("prepare_company ожидает операции одной компании")
-    flagged, panel, rep = flag_quality(ops)
+    known = ops[ops["balance_eod"].notna()]
+    flagged, panel, rep = flag_quality(known)
+    unknown = ops[ops["balance_eod"].isna()]
+    if not unknown.empty:
+        flagged = pd.concat([flagged, unknown.assign(quality="ok")]).sort_values(
+            ["operation_date", "operation_id"])
+        rep.rows_total = len(ops)
+        rep.empty_purpose = int(ops["payment_purpose"].eq("").sum())
+        rep.empty_inn = int(ops["counterparty_inn"].eq("").sum())
+        rep.warnings.append(f"У {len(unknown)} операций неизвестен остаток. Укажите начальный остаток в «Источниках»; "
+                            "пока эти операции не участвуют в прогнозе.")
     return PreparedCompany(str(company_ids[0]), categorize(flagged, classifier), panel, rep)
 
 

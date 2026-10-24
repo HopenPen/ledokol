@@ -2,9 +2,10 @@
 // Операции: поиск и фильтр на сервере, строка раскрывается в карточку с документами,
 // сменой категории и прогнозом без этой операции.
 import { ChevronDown, Plus, Search } from 'lucide-vue-next'
-import { inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { inject, onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { api, ApiError, type ImportResult, type Operation } from '../api'
+import { api, ApiError, type AccountBalance, type ImportResult, type Operation } from '../api'
+import AccountBalanceCard from '../components/AccountBalanceCard.vue'
 import AddPaymentModal from '../components/AddPaymentModal.vue'
 import OperationDetails from '../components/OperationDetails.vue'
 import StatementUpload from '../components/StatementUpload.vue'
@@ -15,6 +16,7 @@ const route = useRoute()
 const id = route.params.id as string
 const reload = inject<() => Promise<void>>('reload')!
 const toast = inject<(t: string) => void>('toast')!
+const balance = inject<Ref<AccountBalance | null>>('balance')!
 const ops = ref<Operation[]>([])
 const categories = ref<{ code: string; label: string }[]>([])
 const query = ref('')
@@ -59,10 +61,10 @@ async function afterImport(results: ImportResult[]) {
 }
 async function afterPayment(warning: string) {
   adding.value = false
-  toast(warning || 'Платёж добавлен. Прогноз обновлён')
   query.value = ''
   category.value = ''
   await Promise.all([load(), reload()])
+  toast(warning || (balance.value?.source === 'unknown' ? 'Платёж сохранён. Для прогноза укажите начальный остаток' : 'Платёж добавлен. Прогноз обновлён'))
 }
 async function afterCategory(count: number) {
   toast(`Категория изменена у ${count} ${count === 1 ? 'операции' : 'операций'}. Прогноз обновлён`)
@@ -83,6 +85,8 @@ const QUALITY_HINT: Record<string, string> = { duplicate: 'дубль', after_ga
         <button class="btn btn-primary" @click="adding = true"><Plus />Добавить платёж</button>
       </div>
     </div>
+
+    <AccountBalanceCard v-if="balance?.source === 'unknown' || balance?.unknown_operations" :company-id="id" @saved="load()" />
 
     <div class="toolbar">
       <label class="search">

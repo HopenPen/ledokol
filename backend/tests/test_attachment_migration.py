@@ -3,6 +3,7 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
 
 from app.core.config import get_settings
@@ -24,7 +25,7 @@ def test_attachment_upgrade_preserves_existing_users(tmp_path, monkeypatch):
         assert 'operation_attachments' in inspect(engine).get_table_names()
         with engine.connect() as connection:
             assert connection.scalar(text('SELECT login FROM users WHERE id = \'kept\'')) == 'owner'
-            assert connection.scalar(text('SELECT version_num FROM alembic_version')) == 'c93d41ba620f'
+            assert connection.scalar(text('SELECT version_num FROM alembic_version')) == ScriptDirectory.from_config(config).get_current_head()
         command.downgrade(config, 'b872c30a951e')
         command.upgrade(config, 'head')
         with engine.connect() as connection:

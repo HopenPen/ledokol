@@ -23,8 +23,8 @@ async def lifespan(_: FastAPI):
     setup_logging()
     if get_settings().env != "prod":
         # В dev/test схема создаётся сама; в prod — только миграциями (alembic upgrade head).
-        from app.db.session import Base, engine
         import app.db.models  # noqa: F401 — регистрируем модели в metadata
+        from app.db.session import Base, engine
 
         Base.metadata.create_all(engine)
     yield
@@ -35,7 +35,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Cashflow — прогноз денег для МСП", version="0.1.0", lifespan=lifespan,
                   docs_url="/docs" if s.env != "prod" else None, redoc_url=None)
     app.add_middleware(CORSMiddleware, allow_origins=s.cors_origins, allow_credentials=False,
-                       allow_methods=["GET", "POST", "PATCH", "DELETE"],
+                       allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
                        allow_headers=["Authorization", "Content-Type", "Idempotency-Key"])
 
     @app.middleware("http")
@@ -58,7 +58,7 @@ def create_app() -> FastAPI:
         return response
 
     @app.exception_handler(Exception)
-    async def unhandled(request: Request, exc: Exception):  # noqa: ARG001
+    async def unhandled(request: Request, exc: Exception):
         # Наружу — общий текст без стектрейса; детали — во внутреннем логе (без данных клиента).
         log.exception("unhandled_error", extra={"reason": type(exc).__name__})
         return JSONResponse({"detail": "Внутренняя ошибка. Мы уже разбираемся."}, status_code=500)

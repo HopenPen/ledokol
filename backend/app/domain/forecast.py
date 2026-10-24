@@ -56,6 +56,7 @@ class FittedModel:
 
 def fit(ops: pd.DataFrame, panel: pd.DataFrame, as_of: date | None = None) -> FittedModel:
     """ops — категоризированные операции одной компании (после flag_quality), panel — дневной остаток."""
+    ops = ops[ops["balance_eod"].notna()]
     if as_of is not None:
         cut = pd.Timestamp(as_of)
         ops, panel = ops[ops["operation_date"].le(cut)], panel[panel["date"].le(cut)]
@@ -205,4 +206,4 @@ def _block_bootstrap(pool: np.ndarray, n: int, h: int, rng: np.random.Generator,
     return pool[idx]
 
 
-__all__ = ["FittedModel", "fit", "forecast", "known_events", "naive_forecast", "mean_flow_forecast", "Direction"]
+__all__ = ["Direction", "FittedModel", "fit", "forecast", "known_events", "mean_flow_forecast", "naive_forecast"]

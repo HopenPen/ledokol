@@ -6,6 +6,7 @@ import { inject, onMounted, ref, watch, type Ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { api, ApiError, type Company, type Dashboard, type EventRow, type ImportResult } from '../api'
 import AddEventModal from '../components/AddEventModal.vue'
+import AccountBalanceCard from '../components/AccountBalanceCard.vue'
 import StatementUpload from '../components/StatementUpload.vue'
 import { humanDate, importSummary, signed, SOURCE_LABEL } from '../format'
 
@@ -71,6 +72,7 @@ async function afterImport(results: ImportResult[]) {
     </div>
 
     <div class="grid">
+      <AccountBalanceCard :company-id="id" />
       <section class="card">
         <div class="card-head"><h2>Банковская выписка</h2><span class="chip chip-brand">основной источник</span></div>
         <p v-if="dashboard" class="small muted">Данные по {{ humanDate(dashboard.forecast.as_of, true) }}. Новая выписка дополнит историю без дублей.</p>

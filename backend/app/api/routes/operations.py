@@ -7,6 +7,7 @@ from sqlalchemy import or_, select
 from app.api.deps import CurrentUser, DbSession, OwnedCompany
 from app.api.schemas import CategoryPatch, OperationOut, OperationSearchIn, PaymentIn
 from app.db.models import Company, Operation
+from app.domain.balances import BalanceError
 from app.domain.categories import CATEGORIES, label
 from app.services.events import IdempotencyConflict
 from app.services.payments import NewPayment, create_payment
@@ -29,6 +30,9 @@ def add_payment(company: OwnedCompany, body: PaymentIn, session: DbSession, resp
         operation, created = create_payment(session, company, NewPayment(**body.model_dump()), idempotency_key)
     except IdempotencyConflict:
         raise HTTPException(status.HTTP_409_CONFLICT, "Этот ключ уже использован с другими данными платежа") from None
+    except BalanceError as exc:
+        session.rollback()
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
     if not created:
         response.status_code = status.HTTP_200_OK
     return _out(operation)

@@ -3,14 +3,15 @@
 import { CalendarPlus } from 'lucide-vue-next'
 import { computed, inject, ref, watch, type Ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { api, ApiError, type Dashboard, type Forecast } from '../api'
+import { api, ApiError, type AccountBalance, type Dashboard, type Forecast } from '../api'
 import AddEventModal from '../components/AddEventModal.vue'
 import AlertCard from '../components/AlertCard.vue'
 import BalanceChart from '../components/BalanceChart.vue'
 import MissedPayments from '../components/MissedPayments.vue'
-import { chanceWords, daysBetween, humanDate, money, percent, plural, rub, signed, SOURCE_LABEL } from '../format'
+import { BALANCE_SOURCE, chanceWords, daysBetween, humanDate, money, percent, plural, rub, signed, SOURCE_LABEL } from '../format'
 
 const dashboard = inject<Ref<Dashboard | null>>('dashboard')!
+const balance = inject<Ref<AccountBalance | null>>('balance')!
 const emptyHistory = inject<Ref<boolean>>('emptyHistory')!
 const reload = inject<() => Promise<void>>('reload')!
 const toast = inject<(t: string) => void>('toast')!
@@ -81,7 +82,7 @@ async function onSaved() {
       <div class="kpi">
         <p class="k-label">На счёте сейчас</p>
         <p class="k-value num">{{ money(f.last_balance) }}</p>
-        <p class="tiny">по выписке на {{ humanDate(f.as_of) }}</p>
+        <p class="tiny">{{ balance ? BALANCE_SOURCE[balance.source] : 'Остаток' }} · {{ humanDate(f.as_of, true) }}</p>
       </div>
       <div class="kpi" :class="{ 'kpi-risk': runway && runway.days <= 14 }">
         <p class="k-label">Запас хода</p>

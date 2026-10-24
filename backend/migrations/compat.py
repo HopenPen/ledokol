@@ -27,7 +27,8 @@ def create_table(name, *elements, column_renames=None):
     for column in expected.columns:
         actual = normalized[column.name]
         require(_same_type(column.type, actual["type"], inspector.bind.dialect.name), f"тип {column.name}")
-        require(column.nullable == actual["nullable"], f"nullable {column.name}")
+        widened_balance = name == "operations" and column.name == "balance_eod" and actual["nullable"]
+        require(column.nullable == actual["nullable"] or widened_balance, f"nullable {column.name}")
     def rename_columns(columns):
         return tuple(renames.get(col, col) for col in columns)
 

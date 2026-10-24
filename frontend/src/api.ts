@@ -23,10 +23,15 @@ export interface Dashboard {
 export interface DayCompare { date: string; plan: number; low: number; high: number; fact: number; deviation: number; flagged: boolean }
 export interface DailyPlanFact { run: { id: string; as_of: string; model_version: string } | null; rows: DayCompare[]; flagged_days: number }
 export interface EventRow { id: string; event_date: string; amount: string; direction: string; kind: string; source: string; title: string; confidence: string; status: string }
-export interface Operation { id: string; op_date: string; amount: string; direction: string; counterparty_name: string; purpose: string; category: string; category_label: string; category_source: string; quality: string; counterparty_inn: string | null; balance_eod: string; source: 'manual' | 'statement' }
-export interface ImportResult { company: Company; rows_total: number; rows_new: number; already_imported: boolean; quality: { rows_rejected: number; rows_total: number; duplicates: number; balance_jumps: number; empty_purpose: number; empty_inn: number; history_working_days: number; warnings: string[] } }
+export interface Operation { id: string; op_date: string; amount: string; direction: string; counterparty_name: string; purpose: string; category: string; category_label: string; category_source: string; quality: string; counterparty_inn: string | null; balance_eod: string | null; source: 'manual' | 'statement' }
+export interface ImportResult { company: Company; rows_total: number; rows_new: number; rows_matched: number; already_imported: boolean; quality: { rows_rejected: number; rows_total: number; duplicates: number; balance_jumps: number; empty_purpose: number; empty_inn: number; history_working_days: number; warnings: string[] } }
 export interface RegistrationInfo { email_delivery: 'disabled' | 'unavailable' | 'local' | 'smtp'; local_mailbox_url: string | null }
-export interface PaymentInput { op_date: string; amount: string; direction: 'in' | 'out'; counterparty_name: string; counterparty_inn: string; purpose: string; balance_eod: string }
+export interface PaymentInput { op_date: string; amount: string; direction: 'in' | 'out'; counterparty_name: string; counterparty_inn: string; purpose: string }
+export interface AccountBalance {
+  amount: string | null; as_of: string | null; source: 'unknown' | 'initial' | 'statement' | 'legacy' | 'calculated'
+  anchor_date: string | null; anchor_source: 'initial' | 'statement' | 'legacy' | null
+  initial_date: string | null; initial_amount: string | null; first_operation_date: string | null; unknown_operations: number
+}
 export interface PlanFactRow { event_id: string | null; title: string; planned_date: string; planned_amount: number; status: string; actual_amount: number; actual_date: string | null }
 export interface Attachment { id: string; operation_id: string; kind: 'receipt' | 'related'; filename: string; content_type: string; size_bytes: number; previewable: boolean; created_at: string }
 export interface ScenarioResult { base: Forecast; scenario: Forecast; delta: { base_first_gap: string | null; scenario_first_gap: string | null; base_min_p50: number; scenario_min_p50: number; extra_shortfall: number } }
@@ -81,6 +86,8 @@ export const api = {
   companies: () => request<Company[]>('GET', '/api/companies'),
   createCompany: (name: string) => request<Company>('POST', '/api/companies', { name }),
   company: (id: string) => request<Company>('GET', `/api/companies/${id}`),
+  balance: (id: string) => request<AccountBalance>('GET', `/api/companies/${id}/balance`),
+  setInitialBalance: (id: string, body: { date: string; amount: string }) => request<AccountBalance>('PUT', `/api/companies/${id}/balance/initial`, body),
   addPayment: (id: string, body: PaymentInput, key: string) => request<Operation>('POST', `/api/companies/${id}/operations`, body, { 'Idempotency-Key': key }),
   importStatement: (file: File) => { const f = new FormData(); f.append('file', file); return request<ImportResult[]>('POST', '/api/companies/import', f) },
   uploadStatement: (id: string, file: File) => { const f = new FormData(); f.append('file', file); return request<ImportResult[]>('POST', `/api/companies/${id}/statements`, f) },

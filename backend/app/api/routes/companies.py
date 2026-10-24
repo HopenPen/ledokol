@@ -8,6 +8,7 @@ from starlette.concurrency import run_in_threadpool
 from app.api.deps import CurrentUser, DbSession, OwnedCompany
 from app.api.schemas import (
     AlertOut,
+    BalanceOut,
     ClientOut,
     CompanyCreate,
     CompanyOut,
@@ -17,14 +18,17 @@ from app.api.schemas import (
     ForecastOut,
     HistoryPoint,
     ImportOut,
+    InitialBalanceIn,
     QualityOut,
 )
 from app.core.config import get_settings
 from app.core.ids import uuid7
 from app.db.models import Company
 from app.db.models import PlannedEvent as PlannedEventRow
+from app.domain.balances import BalanceError
 from app.domain.forecast import MODEL_VERSION
 from app.domain.ingest import StatementFormatError
+from app.services.balances import balance_status, set_initial_balance
 from app.services.forecasting import run_forecast
 from app.services.statements import import_statement
 
@@ -42,6 +46,7 @@ async def _read_upload(file: UploadFile) -> bytes:
 
 def _import_out(results) -> list[ImportOut]:
     return [ImportOut(company=CompanyOut.model_validate(r.company), rows_total=r.rows_total, rows_new=r.rows_new,
+                      rows_matched=r.rows_matched,
                       already_imported=r.already_imported,
                       quality=QualityOut(**{k: getattr(r.quality, k) for k in QualityOut.model_fields}))
             for r in results]
@@ -66,7 +71,7 @@ async def import_new(file: UploadFile, session: DbSession, user: CurrentUser) ->
     try:
         raw = await _read_upload(file)
         return _import_out(await run_in_threadpool(import_statement, session, user, raw, filename=file.filename or "statement.csv"))
-    except StatementFormatError as exc:
+    except (StatementFormatError, BalanceError) as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
 
 
@@ -76,7 +81,7 @@ async def upload_statement(company: OwnedCompany, file: UploadFile, session: DbS
     try:
         raw = await _read_upload(file)
         return _import_out(await run_in_threadpool(import_statement, session, user, raw, company, file.filename or "statement.csv"))
-    except StatementFormatError as exc:
+    except (StatementFormatError, BalanceError) as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
 
 
@@ -93,12 +98,26 @@ def patch_company(company: OwnedCompany, body: CompanyPatch, session: DbSession)
     return company
 
 
+@router.get("/{company_id}/balance", response_model=BalanceOut)
+def get_balance(company: OwnedCompany, session: DbSession) -> dict:
+    return balance_status(session, company)
+
+
+@router.put("/{company_id}/balance/initial", response_model=BalanceOut)
+def put_initial_balance(company: OwnedCompany, body: InitialBalanceIn, session: DbSession) -> dict:
+    try:
+        return set_initial_balance(session, company, body.date, body.amount)
+    except BalanceError as exc:
+        session.rollback()
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
+
+
 @router.get("/{company_id}/dashboard", response_model=DashboardOut)
 def dashboard(company: OwnedCompany, session: DbSession) -> DashboardOut:
     try:
         result, cm = run_forecast(session, company)
     except LookupError:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Добавьте платёж или загрузите выписку") from None
+        raise HTTPException(status.HTTP_409_CONFLICT, "Для прогноза нужны платежи и известный остаток: загрузите выписку или укажите начальный остаток в «Источниках»") from None
     hist = cm.prep.panel.tail(_HISTORY_DAYS)
     return DashboardOut(
         company=CompanyOut.model_validate(company), forecast=ForecastOut.of(result),
@@ -117,7 +136,7 @@ def get_forecast(company: OwnedCompany, session: DbSession, horizon: int = 30) -
     try:
         result, _ = run_forecast(session, company, horizon=horizon)
     except LookupError:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Добавьте платёж или загрузите выписку") from None
+        raise HTTPException(status.HTTP_409_CONFLICT, "Для прогноза нужны платежи и известный остаток: загрузите выписку или укажите начальный остаток в «Источниках»") from None
     return ForecastOut.of(result)
 
 
