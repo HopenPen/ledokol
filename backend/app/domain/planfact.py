@@ -8,7 +8,8 @@ import pandas as pd
 
 from app.domain.types import PlannedEvent
 
-DATE_TOL_DAYS = 5
+DATE_TOL_DAYS = 5          # окно поиска оплаты вокруг ожидаемой даты
+MISSED_GRACE_DAYS = 2      # через сколько дней после срока считаем «не пришло» — предупреждать надо быстро
 AMOUNT_TOL = 0.2
 
 
@@ -38,7 +39,7 @@ def match_events(events: list[PlannedEvent], ops: pd.DataFrame, as_of: date) -> 
             amt = float(hit["amount"].iloc[0])
             status = "received" if amt >= (1 - AMOUNT_TOL) * e.amount else "partial"
             out.append(Match(e, status, amt, hit["operation_date"].iloc[0].date()))
-        elif e.event_date + timedelta(days=DATE_TOL_DAYS) < as_of:
+        elif e.event_date + timedelta(days=MISSED_GRACE_DAYS) < as_of:
             out.append(Match(e, "missed", 0.0, None))
         else:
             out.append(Match(e, "pending", 0.0, None))

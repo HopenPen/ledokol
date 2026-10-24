@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // График остатка: факт (серый) + прогноз (зелёная линия) + «обычный разброс» P10–P90 (полоса) + порог (красный пунктир).
 // Сравнение сценария — вторая линия (оранжевая). Одна ось Y, без двойных шкал.
-import * as echarts from 'echarts'
+import { echarts } from '../charts'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Point } from '../api'
 import { humanDate, rub } from '../format'
@@ -14,7 +14,7 @@ const props = defineProps<{
 }>()
 
 const el = ref<HTMLDivElement>()
-let chart: echarts.ECharts | null = null
+let chart: ReturnType<typeof echarts.init> | null = null
 
 function render() {
   if (!chart) return

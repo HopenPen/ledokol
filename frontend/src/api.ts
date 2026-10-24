@@ -1,5 +1,5 @@
-// Тонкий клиент к FastAPI. Токен держим в памяти вкладки (не в localStorage): закрыл вкладку — вышел.
-// Для демо этого достаточно; в бою вход идёт через авторизацию банка.
+// Тонкий клиент к FastAPI. Токен — в sessionStorage: F5 не разлогинивает, закрыл вкладку — вышел.
+// localStorage не используем: токен жил бы бессрочно и был бы виден всем вкладкам. В бою — вход через банк.
 
 export interface Point { date: string; p10: number; p50: number; p90: number; prob_below: number }
 export interface FutureEvent {
@@ -18,15 +18,26 @@ export interface Company { id: string; external_id: string; name: string; indust
 export interface Dashboard {
   company: Company; forecast: Forecast; history: { date: string; balance: number }[]
   top_clients: { counterparty_key: string; name: string; share: number }[]; model_version: string
+  missed_payments: EventRow[]
 }
+export interface DayCompare { date: string; plan: number; low: number; high: number; fact: number; deviation: number; flagged: boolean }
+export interface DailyPlanFact { run: { id: string; as_of: string; model_version: string } | null; rows: DayCompare[]; flagged_days: number }
 export interface EventRow { id: string; event_date: string; amount: string; direction: string; kind: string; source: string; title: string; confidence: string; status: string }
 export interface Operation { id: string; op_date: string; amount: string; direction: string; counterparty_name: string; purpose: string; category: string; category_label: string; category_source: string; quality: string }
 export interface PlanFactRow { event_id: string | null; title: string; planned_date: string; planned_amount: number; status: string; actual_amount: number; actual_date: string | null }
 export interface ScenarioResult { base: Forecast; scenario: Forecast; delta: { base_first_gap: string | null; scenario_first_gap: string | null; base_min_p50: number; scenario_min_p50: number; extra_shortfall: number } }
 
-let token: string | null = null
+const TOKEN_KEY = 'cashflow.token'
+function readToken(): string | null {
+  try { return sessionStorage.getItem(TOKEN_KEY) } catch { return null }   // приватный режим может запрещать storage
+}
+let token: string | null = readToken()
+function setToken(t: string | null) {
+  token = t
+  try { t ? sessionStorage.setItem(TOKEN_KEY, t) : sessionStorage.removeItem(TOKEN_KEY) } catch { /* работаем из памяти */ }
+}
 export const isLoggedIn = () => token !== null
-export const logout = () => { token = null }
+export const logout = () => setToken(null)
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message) }
@@ -52,7 +63,7 @@ async function request<T>(method: string, path: string, body?: unknown, headers:
 export const api = {
   async login(login: string, password: string) {
     const r = await request<{ access_token: string }>('POST', '/api/auth/login', { login, password })
-    token = r.access_token
+    setToken(r.access_token)
   },
   companies: () => request<Company[]>('GET', '/api/companies'),
   importStatement: (file: File) => { const f = new FormData(); f.append('file', file); return request<{ company: Company; rows_new: number }[]>('POST', '/api/companies/import', f) },
@@ -63,6 +74,9 @@ export const api = {
   events: (id: string) => request<EventRow[]>('GET', `/api/companies/${id}/events`),
   // Idempotency-Key создаётся один раз на открытие формы: двойной клик не создаст два события.
   addEvent: (id: string, body: object, idemKey: string) => request<EventRow>('POST', `/api/companies/${id}/events`, body, { 'Idempotency-Key': idemKey }),
+  patchEvent: (id: string, eventId: string, body: { event_date?: string; status?: 'expected' | 'cancelled' }) => request<EventRow>('PATCH', `/api/companies/${id}/events/${eventId}`, body),
+  planFactDaily: (id: string) => request<DailyPlanFact>('GET', `/api/companies/${id}/plan-fact/daily`),
+  preview: (id: string, body: object) => request<Forecast>('POST', `/api/companies/${id}/forecast/preview`, body),
   deleteEvent: (id: string, eventId: string) => request<void>('DELETE', `/api/companies/${id}/events/${eventId}`),
   scenario: (id: string, body: object) => request<ScenarioResult>('POST', `/api/companies/${id}/scenarios`, body),
   operations: (id: string, offset = 0, category = '') => request<Operation[]>('GET', `/api/companies/${id}/operations?limit=100&offset=${offset}${category ? `&category=${category}` : ''}`),

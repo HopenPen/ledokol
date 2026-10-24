@@ -1,11 +1,12 @@
 <script setup lang="ts">
 // Главный экран: ответ одной фразой → график → предупреждения → ближайшие события.
-import { computed, inject, ref, type Ref } from 'vue'
+import { computed, inject, ref, watch, type Ref } from 'vue'
 import { useRoute } from 'vue-router'
-import type { Dashboard } from '../api'
+import { api, type Dashboard, type Forecast } from '../api'
 import AddEventModal from '../components/AddEventModal.vue'
 import AlertCard from '../components/AlertCard.vue'
 import BalanceChart from '../components/BalanceChart.vue'
+import MissedPayments from '../components/MissedPayments.vue'
 import { chance, humanDate, rub, SOURCE_LABEL } from '../format'
 
 const dashboard = inject<Ref<Dashboard | null>>('dashboard')!
@@ -14,7 +15,14 @@ const route = useRoute()
 const modal = ref<{ preset?: string } | null>(null)
 const toast = ref('')
 
-const f = computed(() => dashboard.value?.forecast)
+// Горизонт: 30 дней приходит с дашбордом (это «официальный» прогноз, он сохраняется для план-факта),
+// 60 и 90 догружаем отдельно и только показываем.
+const horizon = ref(30)
+const longer = ref<Forecast | null>(null)
+watch([horizon, dashboard], async () => {
+  longer.value = horizon.value === 30 ? null : await api.forecast(route.params.id as string, horizon.value)
+})
+const f = computed(() => longer.value ?? dashboard.value?.forecast)
 const tone = computed(() => !f.value?.alerts.length ? 'ok' : f.value.alerts[0].probability >= 0.5 ? 'risk' : 'warn')
 
 async function onSaved() {
@@ -35,7 +43,14 @@ async function onSaved() {
       <p v-for="w in f.warnings" :key="w" class="note">{{ w }}</p>
     </section>
 
+    <MissedPayments class="missed-block" :company-id="route.params.id as string" :events="dashboard.missed_payments"
+                    :min-date="f.as_of" @changed="reload" />
+
     <section class="card chart-card">
+      <div class="horizon" role="group" aria-label="Горизонт прогноза">
+        <button v-for="h in [30, 60, 90]" :key="h" class="btn" :class="{ on: horizon === h }"
+                :aria-pressed="horizon === h" @click="horizon = h">{{ h }} дней</button>
+      </div>
       <BalanceChart :history="dashboard.history" :points="f.points" :threshold="f.threshold" />
     </section>
 
@@ -68,8 +83,11 @@ async function onSaved() {
 
 <style scoped>
 .layout { display: grid; gap: 20px; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
-.hero, .chart-card { grid-column: 1; }
-.alerts { grid-column: 2; grid-row: 1 / span 3; display: grid; gap: 12px; align-content: start; }
+.hero, .chart-card, .missed-block { grid-column: 1; }
+.horizon { display: flex; gap: 6px; justify-content: flex-end; margin-bottom: 4px; }
+.horizon .btn { padding: 4px 10px; font-size: 13px; }
+.horizon .on { border-color: var(--green); background: var(--green-wash); color: var(--green); }
+.alerts { grid-column: 2; grid-row: 1 / span 4; display: grid; gap: 12px; align-content: start; }
 .events { grid-column: 1; }
 /* Единственный «громкий» элемент экрана — ответ. Крупный, плотный, с цветной чертой слева по уровню риска. */
 .hero { padding: 8px 0 8px 20px; border-left: 6px solid var(--green); }

@@ -108,7 +108,8 @@ def _reconcile_events(session: Session, company: Company, prep) -> None:
     """
     as_of = prep.panel["date"].iloc[-1].date()
     due = list(session.scalars(select(PlannedEventRow).where(
-        PlannedEventRow.company_id == company.id, PlannedEventRow.status == "expected",
+        # «missed» тоже перепроверяем: деньги могли прийти позже, тогда платёж закроется как пришедший.
+        PlannedEventRow.company_id == company.id, PlannedEventRow.status.in_(["expected", "missed"]),
         PlannedEventRow.event_date <= as_of)))
     if not due:
         return
