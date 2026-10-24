@@ -80,14 +80,14 @@ def planned_events(session: Session, company: Company, after: date) -> list[Plan
 
 
 def run_forecast(session: Session, company: Company, scenario: Scenario | None = None,
-                 horizon: int | None = None) -> tuple[ForecastResult, CompanyModel]:
+                 horizon: int | None = None, *, save: bool = True) -> tuple[ForecastResult, CompanyModel]:
     s = get_settings()
     cm = company_model(session, company)
     events = planned_events(session, company, cm.fitted.as_of)
     result = forecast(cm.fitted, events, horizon=horizon or s.forecast_horizon, n_sims=s.forecast_sims,
                       seed=s.forecast_seed, threshold=float(company.min_balance), scenario=scenario,
                       data_warnings=cm.prep.quality.warnings)
-    if scenario is None and horizon in (None, s.forecast_horizon):
+    if save and scenario is None and horizon in (None, s.forecast_horizon):
         # Сохраняем только «официальный» прогноз: сценарии и черновики — это не обещание, их не сравниваем с фактом.
         save_snapshot(session, company, result, events)
     return result, cm
