@@ -62,7 +62,7 @@ async function onSaved() {
         <p class="tiny">{{ balance ? BALANCE_SOURCE[balance.source] : 'Остаток' }} · {{ humanDate(f.as_of, true) }}</p>
       </div>
       <div class="kpi" :class="{ 'kpi-risk': runway && runway.days <= 14 }">
-        <p class="k-label">Запас хода</p>
+        <p class="k-label">Запас</p>
         <p v-if="runway" class="k-value num">{{ runway.days }} {{ plural(runway.days, 'день', 'дня', 'дней') }}</p>
         <p v-else class="k-value">весь прогноз</p>
         <p class="tiny">{{ runway ? `до ${humanDate(runway.date)}` : `нехватки не видно на ${f.points.length} рабочих дней` }}</p>

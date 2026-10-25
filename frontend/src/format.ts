@@ -80,7 +80,7 @@ export const BALANCE_SOURCE: Record<string, string> = {
 }
 
 export function chanceWords(p: number): string {
-  return p >= 0.8 ? 'почти наверняка' : p >= 0.5 ? 'вероятно' : 'возможно'
+  return p >= 0.8 ? 'наиболее вероятно' : p >= 0.5 ? 'вероятно' : 'наименее вероятно'
 }
 
 export function percent(p: number): string {

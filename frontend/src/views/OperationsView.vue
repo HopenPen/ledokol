@@ -142,7 +142,7 @@ const QUALITY_HINT: Record<string, string> = { duplicate: 'дубль', after_ga
 .ops { display: grid; gap: 16px; }
 .head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
 .head h1 { margin-bottom: 4px; }
-.head-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.head-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-start; }
 .toolbar { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 12px; }
 .search { position: relative; }
 .search svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 18px; height: 18px; color: var(--ink-3); pointer-events: none; }

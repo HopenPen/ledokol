@@ -59,7 +59,14 @@ def import_statement(session: Session, user: User, raw: bytes, company: Company 
             session.execute(update(Company).where(Company.id == target.id).values(data_version=Company.data_version + 1))
             results.append(ImportResult(target, len(part), created, False, quality, matched))
         if not results:
-            raise StatementFormatError("В файле нет платежей выбранной компании")
+            if company is not None:
+                identifiers = sorted(parsed.frame["company_id"].unique())
+                found = ", ".join(identifiers[:3]) + (", …" if len(identifiers) > 3 else "")
+                raise StatementFormatError(
+                    f"Выписка относится к другой компании: в файле {found}, выбрана {company.external_id}. "
+                    "Для добавления другой компании перейдите в «Все компании» и загрузите выписку там. "
+                    "Для дозагрузки истории нужна выписка с тем же идентификатором компании.")
+            raise StatementFormatError("В файле нет подходящих платежей")
         rejected = int(parsed.frame.attrs.get("rows_rejected", 0))
         if rejected:
             lines = ", ".join(map(str, parsed.frame.attrs.get("rejected_lines", [])))

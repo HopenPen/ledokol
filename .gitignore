@@ -233,3 +233,4 @@ backend/models/
 data/
 results/
 backtest/
+.csv

@@ -45,6 +45,10 @@ function onDrop(ev: DragEvent) { over.value = false; send(ev.dataTransfer?.files
   <span v-else class="inline">
     <label class="btn" :class="{ busy }" :for="id"><FileUp />{{ busy ? 'Загружаем…' : label }}</label>
     <input :id="id" class="visually-hidden" type="file" accept=".csv,.txt,.pdf" :disabled="busy" @change="onInput" />
+    <span v-if="error" class="upload-error" role="alert">
+      <span class="error">{{ error }}</span>
+      <RouterLink v-if="companyId" to="/companies" class="small">Перейти ко всем компаниям</RouterLink>
+    </span>
   </span>
 </template>
 
@@ -58,7 +62,9 @@ function onDrop(ev: DragEvent) { over.value = false; send(ev.dataTransfer?.files
 .z-ico { width: 36px; height: 36px; color: var(--brand); }
 .z-title { font-size: 18px; font-weight: 600; }
 .zone:focus-within .btn, .inline:focus-within .btn { outline: 3px solid color-mix(in srgb, var(--brand) 45%, transparent); outline-offset: 2px; }
+.inline { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 8px; max-width: 100%; }
 .inline label { cursor: pointer; }
+.upload-error { display: grid; gap: 4px; max-width: 48ch; }
 .busy { opacity: 0.7; cursor: progress; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
