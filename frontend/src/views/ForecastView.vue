@@ -1,9 +1,9 @@
 <script setup lang="ts">
-// Главная: три цифры → график и вывод → разрывы с причинами и действиями → ближайшие платежи.
+// Главная: заголовок → три цифры → график и вывод → разрывы с причинами и действиями → ближайшие платежи.
 import { CalendarPlus } from 'lucide-vue-next'
-import { computed, inject, ref, watch, type Ref } from 'vue'
+import { computed, inject, ref, type Ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { api, ApiError, type AccountBalance, type Dashboard, type Forecast } from '../api'
+import type { AccountBalance, Dashboard } from '../api'
 import AddEventModal from '../components/AddEventModal.vue'
 import AlertCard from '../components/AlertCard.vue'
 import BalanceChart from '../components/BalanceChart.vue'
@@ -19,27 +19,9 @@ const route = useRoute()
 const adding = ref(false)
 const showAll = ref(false)
 
-// 30 дней приходят с дашбордом (этот прогноз сохраняется для план-факта); 60 и 90 догружаем только для показа.
-const horizon = ref(30)
-const longer = ref<Forecast | null>(null)
-const loadingLonger = ref(false)
-const forecastError = ref('')
-watch([horizon, dashboard], async (_, __, onCleanup) => {
-  let active = true
-  onCleanup(() => { active = false })
-  longer.value = null
-  forecastError.value = ''
-  loadingLonger.value = false
-  if (horizon.value === 30 || !dashboard.value) return
-  loadingLonger.value = true
-  try {
-    const result = await api.forecast(route.params.id as string, horizon.value)
-    if (active) longer.value = result
-  } catch (e) {
-    if (active) forecastError.value = e instanceof ApiError ? e.message : 'Не удалось загрузить прогноз'
-  } finally { if (active) loadingLonger.value = false }
-})
-const f = computed(() => longer.value ?? dashboard.value?.forecast ?? null)
+// Основной прогноз на 30 рабочих дней приходит с дашбордом и сохраняется для план-факта.
+const f = computed(() => dashboard.value?.forecast ?? null)
+const firstGap = computed(() => f.value?.alerts[0] ?? null)
 
 const tone = computed(() => {
   const a = f.value?.alerts.find((x) => !x.worst_case)
@@ -72,6 +54,7 @@ async function onSaved() {
   </div>
 
   <div v-else-if="f && dashboard" class="home">
+    <h1 class="page-title">Планирование движения денежных средств</h1>
     <section class="kpis" aria-label="Главные цифры">
       <div class="kpi">
         <p class="k-label">На счёте сейчас</p>
@@ -97,17 +80,15 @@ async function onSaved() {
       <section class="card chart-card">
         <div class="card-head">
           <h2>Остаток на счёте</h2>
-          <div class="seg" role="group" aria-label="Горизонт прогноза">
-            <button v-for="h in [30, 60, 90]" :key="h" :aria-pressed="horizon === h" @click="horizon = h">{{ h }} дней</button>
-          </div>
+          <span class="small muted">Прогноз на {{ f.points.length }} рабочих дней</span>
         </div>
-        <p v-if="loadingLonger" class="small muted" role="status">Загружаем прогноз. Пока показаны 30 рабочих дней.</p>
-        <p v-if="forecastError" class="error" role="alert">{{ forecastError }} Показан прогноз на 30 рабочих дней.</p>
-        <div :class="{ dim: loadingLonger }">
-          <BalanceChart :history="dashboard.history" :points="f.points" :threshold="f.threshold" :events="f.events" :alerts="f.alerts" />
-        </div>
+        <BalanceChart :history="dashboard.history" :points="f.points" :threshold="f.threshold" :events="f.events" :alerts="f.alerts" />
         <section class="answer" :class="tone">
-          <h1>{{ f.headline }}</h1>
+          <h2>{{ firstGap ? `Дальше кассовый разрыв в ${money(firstGap.shortfall)}` : 'Кассового разрыва в прогнозе не видно' }}</h2>
+          <p v-if="firstGap" class="small muted">
+            {{ `С ${humanDate(firstGap.start)} · ${chanceWords(firstGap.probability)} (${percent(firstGap.probability)})${firstGap.worst_case ? ', только в плохом сценарии' : ''}.` }}
+          </p>
+          <p v-if="f.last_balance < f.threshold" class="note">{{ f.headline }}</p>
           <p v-if="f.low_history" class="note">Истории пока мало, поэтому прогноз приблизительный.</p>
           <p v-for="w in f.warnings" :key="w" class="note">{{ w }}</p>
         </section>
@@ -158,7 +139,8 @@ async function onSaved() {
 .answer { margin-top: 20px; padding-left: 20px; border-left: 4px solid var(--brand); }
 .answer.warn { border-left-color: var(--warn); }
 .answer.risk { border-left-color: var(--risk); }
-.answer h1 { font-size: clamp(26px, 3.4vw, 38px); line-height: 1.15; max-width: 28ch; font-weight: 700; letter-spacing: -0.025em; }
+.page-title, .answer h2 { font-size: clamp(26px, 3.4vw, 38px); line-height: 1.15; font-weight: 700; letter-spacing: -0.025em; }
+.answer > .small { margin-top: 8px; }
 .note { color: var(--warn); margin-top: 8px; font-size: 14px; }
 
 .kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
@@ -170,7 +152,6 @@ async function onSaved() {
 
 .grid { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 20px; align-items: start; }
 .chart-card { min-width: 0; }
-.dim { opacity: 0.5; transition: opacity 150ms; }
 .side { display: grid; gap: 12px; }
 .side-title { font-size: 16px; color: var(--ink-2); }
 .ok-plate { background: var(--brand-soft); color: var(--brand); padding: 16px 20px; border-radius: var(--radius); display: grid; gap: 4px; }
