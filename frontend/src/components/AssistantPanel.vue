@@ -17,12 +17,16 @@ const CHIPS = ['Хватит ли денег до зарплаты?', 'Поче�
 async function send(q = question.value) {
   if (!q.trim() || busy.value) return
   busy.value = true
+  const index = history.value.length
+  history.value.push({ q: q.trim(), a: '', by: '' })
+  question.value = ''
+  await nextTick()
+  log.value?.scrollTo({ top: log.value.scrollHeight })
   try {
     const r = await api.ask(props.companyId, q.trim())
-    history.value.push({ q, a: r.answer, by: r.generated_by })
-    question.value = ''
+    Object.assign(history.value[index], { a: r.answer, by: r.generated_by })
   } catch (e) {
-    history.value.push({ q, a: e instanceof ApiError ? e.message : 'Не получилось ответить', by: 'error' })
+    Object.assign(history.value[index], { a: e instanceof ApiError ? e.message : 'Не получилось ответить', by: 'error' })
   } finally {
     busy.value = false
     await nextTick()
@@ -46,8 +50,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
       </div>
       <div v-for="(m, i) in history" :key="i" class="msg">
         <p class="q">{{ m.q }}</p>
-        <p class="a" :class="{ err: m.by === 'error' }">{{ m.a }}</p>
-        <p v-if="m.by !== 'error'" class="tiny">{{ m.by === 'template' ? 'Ответ по шаблону, цифры из прогноза' : 'Ответ сгенерирован моделью, цифры из прогноза' }}</p>
+        <p v-if="m.a" class="a" :class="{ err: m.by === 'error' }">{{ m.a }}</p>
+        <p v-if="m.a && m.by !== 'error'" class="tiny">{{ m.by === 'template' ? 'Ответ по шаблону, цифры из прогноза' : 'Ответ сгенерирован моделью, цифры из прогноза' }}</p>
       </div>
       <p v-if="busy" class="tiny">Думаем…</p>
     </div>
