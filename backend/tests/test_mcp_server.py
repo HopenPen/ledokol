@@ -61,6 +61,50 @@ def test_mcp_rejects_foreign_company(owned, monkeypatch):
             tool(owned["external_id"])
 
 
+def test_real_operation_details_never_leave_mcp(client, monkeypatch):
+    monkeypatch.setattr(server, "_USER", "alice")
+    frame = make_company()
+    frame["counterparty_name"] = frame["counterparty_name"] + " СекретКонтрагентаЖ41"
+    frame["payment_purpose"] = frame["payment_purpose"] + " НепубличноеНазначениеЖ41"
+    imported = _import(client, _login(client, "alice"), to_case_csv(frame))
+    company = imported["company"]["external_id"]
+    summary = json.loads(server.forecast_summary(company))
+    clients = server.list_clients(company)
+    assert clients, "Синтетическая история должна содержать крупнейшего клиента"
+    scenario = json.loads(server.what_if(company, client_ref=clients[0]["client_ref"], client_delay_weeks=2))
+    payload = json.dumps({"summary": summary, "clients": clients, "scenario": scenario}, ensure_ascii=False)
+    private = set(frame["counterparty_name"]) | set(frame["payment_purpose"]) | set(frame["counterparty_inn"])
+    for value in private - {""}:
+        assert value not in payload
+    assert "СекретКонтрагентаЖ41" not in payload and "НепубличноеНазначениеЖ41" not in payload
+    assert all(set(item) == {"client_ref", "share"} for item in clients)
+
+
+def test_zero_scenario_matches_actual_base_forecast(owned):
+    result = json.loads(server.what_if(owned["external_id"]))
+    summary = json.loads(server.forecast_summary(owned["external_id"]))
+    first = summary["gaps"][0] if summary["gaps"] else None
+    assert result["before"] == result["after"] == {
+        "first_gap_date": first["start"] if first else None,
+        "shortfall": first["shortfall"] if first else 0,
+        "probability": first["probability"] if first else 0,
+        "gaps": len(summary["gaps"]),
+    }
+    assert result["headline"] == summary["headline"]
+
+
+def test_list_companies_excludes_foreign_and_missing_look_identical(owned, client):
+    foreign = _import(client, _login(client, "bob"), to_case_csv(make_company(company_id="FOREIGN")))
+    assert server.list_companies() == [owned["external_id"]]
+    for tool in (server.forecast_summary, server.what_if, server.list_clients):
+        messages = []
+        for external_id in (foreign["company"]["external_id"], "MISSING"):
+            with pytest.raises(ValueError) as failure:
+                tool(external_id)
+            messages.append(str(failure.value))
+        assert messages == ["Компания не найдена", "Компания не найдена"]
+
+
 @pytest.mark.parametrize("kwargs", [
     {"revenue_drop_pct": -1}, {"revenue_drop_pct": 91}, {"revenue_drop_pct": float("nan")},
     {"fixed_cost_increase_pct": float("inf")}, {"fixed_cost_increase_pct": 101},

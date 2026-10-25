@@ -23,6 +23,8 @@ from app.llm.privacy import build_context
 from app.services.forecasting import company_model, run_forecast
 
 try:
+    from mcp.types import ToolAnnotations
+
     try:
         from mcp.server.mcpserver import MCPServer
     except ImportError:  # SDK 1.x, который также допускает optional extra.
@@ -32,6 +34,7 @@ except ImportError as exc:  # pragma: no cover
 
 mcp = MCPServer("cashflow")
 _USER = os.environ.get("CASHFLOW_MCP_USER", "demo")
+_READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
 
 
 def _company(session, external_id: str) -> Company:
@@ -43,7 +46,7 @@ def _company(session, external_id: str) -> Company:
     return company
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 def list_companies() -> list[str]:
     """Список компаний пользователя (внешние id из выписки)."""
     with SessionLocal() as s:
@@ -51,7 +54,7 @@ def list_companies() -> list[str]:
         return list(s.scalars(select(Company.external_id).where(Company.owner_id == user.id))) if user else []
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 def forecast_summary(company: str) -> str:
     """Обезличенная сводка прогноза остатка на 30 рабочих дней: разрывы, их вероятность и причины."""
     with SessionLocal() as s:
@@ -64,7 +67,7 @@ def _client_ref(company_id: str, key: str) -> str:
     return hashlib.sha256(f"{company_id}:{key}".encode()).hexdigest()[:16]
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 def list_clients(company: str) -> list[dict]:
     """Крупнейшие клиенты: обезличенная ссылка для what_if и доля поступлений, без имён и ИНН."""
     with SessionLocal() as s:
@@ -98,7 +101,7 @@ def _gap_summary(result) -> dict:
             "gaps": len(context["gaps"])}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 def what_if(company: str, revenue_drop_pct: float = 0.0, fixed_cost_increase_pct: float = 0.0,
             client_delay_weeks: int = 0, client_ref: str | None = None) -> str:
     """Было → стало: дата, сумма и вероятность разрыва. Задержка клиента — 2–4 недели, ссылка из list_clients.
@@ -125,5 +128,9 @@ def what_if(company: str, revenue_drop_pct: float = 0.0, fixed_cost_increase_pct
                        "before": _gap_summary(base), "after": _gap_summary(res)}, ensure_ascii=False)
 
 
-if __name__ == "__main__":
+def main() -> None:
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()
