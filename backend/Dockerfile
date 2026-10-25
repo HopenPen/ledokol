@@ -2,11 +2,11 @@ FROM python:3.11-slim
 COPY --from=ghcr.io/astral-sh/uv:0.12 /uv /bin/uv
 WORKDIR /app
 COPY pyproject.toml uv.lock* ./
-RUN uv sync --no-dev --no-install-project
+RUN uv sync --no-dev --extra mcp --no-install-project
 COPY app ./app
 COPY migrations ./migrations
 COPY alembic.ini ./
-RUN uv sync --no-dev && uv pip install "psycopg[binary]>=3.2"
+RUN uv sync --no-dev --extra mcp && uv pip install "psycopg[binary]>=3.2"
 # Не root: приложению не нужны права на систему.
 # Зависимости доступны для чтения; приложению нужен доступ на запись только в рабочий каталог.
 RUN useradd --create-home appuser && chown appuser /app

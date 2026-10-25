@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from contextvars import ContextVar
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
@@ -34,11 +35,15 @@ except ImportError as exc:  # pragma: no cover
 
 mcp = MCPServer("cashflow")
 _USER = os.environ.get("CASHFLOW_MCP_USER", "demo")
+request_scope: ContextVar[tuple[str, str] | None] = ContextVar("mcp_request_scope", default=None)
 _READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
 
 
 def _company(session, external_id: str) -> Company:
-    user = session.scalar(select(User).where(User.login == _USER))
+    scope = request_scope.get()
+    if scope and external_id != scope[1]:
+        raise ValueError("Компания не найдена")
+    user = session.scalar(select(User).where(User.login == (scope[0] if scope else _USER)))
     company = session.scalar(select(Company).where(Company.owner_id == user.id, Company.external_id == external_id)) \
         if user else None
     if company is None:
@@ -50,8 +55,14 @@ def _company(session, external_id: str) -> Company:
 def list_companies() -> list[str]:
     """Список компаний пользователя (внешние id из выписки)."""
     with SessionLocal() as s:
-        user = s.scalar(select(User).where(User.login == _USER))
-        return list(s.scalars(select(Company.external_id).where(Company.owner_id == user.id))) if user else []
+        scope = request_scope.get()
+        user = s.scalar(select(User).where(User.login == (scope[0] if scope else _USER)))
+        if not user:
+            return []
+        query = select(Company.external_id).where(Company.owner_id == user.id)
+        if scope:
+            query = query.where(Company.external_id == scope[1])
+        return list(s.scalars(query))
 
 
 @mcp.tool(annotations=_READ_ONLY)

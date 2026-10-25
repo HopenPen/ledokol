@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     llm_provider: Literal["none", "openai"] = "none"
     llm_base_url: str | None = None      # None — api.openai.com; иначе свой шлюз / модель в контуре банка
     llm_model: str = ""
+    llm_mcp_enabled: bool = False
     llm_api_key: SecretStr | None = None
 
     @field_validator("local_mailbox_url", mode="before")

@@ -1,10 +1,13 @@
 """Будущие события (ручной ввод), сценарии «что если», план-факт, интеграции и ассистент."""
 from __future__ import annotations
 
+import asyncio
+
+import httpx
 from fastapi import APIRouter, Header, HTTPException, Response, status
 from sqlalchemy import select
 
-from app.api.deps import DbSession, OwnedCompany
+from app.api.deps import CurrentUser, DbSession, OwnedCompany
 from app.api.schemas import (
     AskIn,
     AskOut,
@@ -23,6 +26,7 @@ from app.api.schemas import (
     ScenarioOut,
     SyncOut,
 )
+from app.core.config import get_settings
 from app.db.models import PlannedEvent as PlannedEventRow
 from app.domain.planfact import compare_daily, match_events
 from app.domain.scenarios import ClientDelay, ExtraExpense, Scenario
@@ -188,7 +192,15 @@ def sync_fns(company: OwnedCompany, session: DbSession) -> list[CounterpartyChec
 
 # --- ассистент ------------------------------------------------------------------------------------------------
 @router.post("/assistant/ask", response_model=AskOut)
-def assistant_ask(company: OwnedCompany, body: AskIn, session: DbSession) -> AskOut:
+def assistant_ask(company: OwnedCompany, body: AskIn, session: DbSession, user: CurrentUser) -> AskOut:
+    if get_settings().llm_mcp_enabled:
+        try:
+            from app.mcp_chat import ask as ask_mcp
+
+            answer = asyncio.run(ask_mcp(body.question, scope=(user.login, company.external_id)))
+            return AskOut(answer=answer, generated_by=f"{get_settings().llm_model}+mcp")
+        except (ImportError, RuntimeError, ValueError, httpx.HTTPError, KeyError, IndexError):
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Ассистент сейчас недоступен. Попробуйте ещё раз.") from None
     try:
         result, _ = run_forecast(session, company)
     except LookupError:
