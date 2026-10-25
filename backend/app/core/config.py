@@ -23,6 +23,7 @@ class Settings(BaseSettings):
 
     public_app_url: AnyHttpUrl = AnyHttpUrl("http://localhost:5173")
     require_email_verification: bool = False
+    signup_demo_companies: bool = True
     verification_ttl_minutes: int = Field(default=60, ge=1, le=1440)
     smtp_host: str | None = None
     smtp_port: int = Field(default=587, ge=1, le=65535)

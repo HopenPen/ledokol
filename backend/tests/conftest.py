@@ -12,6 +12,7 @@ import pytest
 # Тестовое окружение: своя БД в памяти, тестовые секреты. Задаём ДО импорта приложения.
 os.environ.setdefault("CASHFLOW_ENV", "test")
 os.environ.setdefault("CASHFLOW_LLM_MCP_ENABLED", "false")
+os.environ.setdefault("CASHFLOW_SIGNUP_DEMO_COMPANIES", "false")
 os.environ.setdefault("CASHFLOW_REQUIRE_EMAIL_VERIFICATION", "true")
 os.environ.setdefault("CASHFLOW_DATABASE_URL", "sqlite:///./test_cashflow.db")
 os.environ.setdefault("CASHFLOW_JWT_SECRET", "test-secret-test-secret-test-secret-123")

@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Annotated
 
 import httpx
-from fastapi import APIRouter, Header, HTTPException, Response, status
+from fastapi import APIRouter, File, Form, Header, HTTPException, Response, UploadFile, status
 from sqlalchemy import select
+from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, DbSession, OwnedCompany
 from app.api.schemas import (
@@ -33,12 +35,61 @@ from app.domain.scenarios import ClientDelay, ExtraExpense, Scenario
 from app.domain.types import ForecastResult
 from app.integrations.http import IntegrationError
 from app.llm.assistant import ask
+from app.llm.chat_files import MAX_BYTES, MAX_FILES, content_part
 from app.services.events import IdempotencyConflict, NewEvent, cancel_event, create_manual_event
 from app.services.forecasting import company_model, run_forecast, run_preview, to_domain_event
 from app.services.integrations import check_counterparties, sync_onec
 from app.services.snapshots import runs_before
 
 router = APIRouter(prefix="/companies/{company_id}", tags=["planning"])
+
+
+@router.post("/assistant/ask-with-files", response_model=AskOut)
+async def assistant_files(company: OwnedCompany, user: CurrentUser,
+                          files: Annotated[list[UploadFile], File()],
+                          consent: Annotated[bool, Form()],
+                          question: Annotated[str, Form(max_length=500)] = "Разбери прикреплённые файлы") -> AskOut:
+    try:
+        if not consent:
+            raise HTTPException(422, "Подтвердите передачу выбранных файлов RouterAI для анализа")
+        if not get_settings().llm_mcp_enabled:
+            raise HTTPException(503, "Анализ файлов требует включённого MCP-ассистента")
+        if not 1 <= len(files) <= MAX_FILES:
+            raise HTTPException(422, "Прикрепите от 1 до 3 файлов")
+        parts, total = [], 0
+        for file in files:
+            raw = await file.read(MAX_BYTES + 1)
+            total += len(raw)
+            if total > 10 * 1024 * 1024:
+                raise HTTPException(413, "Общий размер файлов больше 10 МБ")
+            try:
+                parts.append(await run_in_threadpool(content_part, file.filename or "", raw))
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from None
+        try:
+            from app.mcp_chat import ask as ask_mcp
+
+            if any(part["type"] == "image_url" for part in parts):
+                settings = get_settings()
+                if not settings.llm_base_url or not settings.llm_api_key:
+                    raise HTTPException(503, "Провайдер LLM не настроен")
+                async with httpx.AsyncClient(timeout=15) as http:
+                    response = await http.get(settings.llm_base_url.rstrip("/") + "/models", headers={
+                        "Authorization": "Bearer " + settings.llm_api_key.get_secret_value()})
+                    response.raise_for_status()
+                    model = next((item for item in response.json().get("data", [])
+                                  if item["id"] == settings.llm_model), {})
+                modalities = (model.get("architecture") or {}).get("input_modalities", [])
+                if "image" not in modalities:
+                    raise HTTPException(422, "Выбранная модель не читает изображения. Выберите модель со зрением или прикрепите текстовый PDF/TXT/CSV")
+            answer = await ask_mcp(question.strip() or "Разбери прикреплённые файлы",
+                                   scope=(user.login, company.external_id), attachments=parts)
+            return AskOut(answer=answer, generated_by=f"{get_settings().llm_model}+mcp")
+        except (ImportError, RuntimeError, ValueError, httpx.HTTPError, KeyError, IndexError):
+            raise HTTPException(502, "Не удалось проанализировать файлы. Попробуйте ещё раз.") from None
+    finally:
+        for file in files:
+            await file.close()
 
 
 def _model(session, company):

@@ -126,6 +126,13 @@ export const api = {
   },
   deleteAttachment: (attId: string) => request<void>('DELETE', `/api/attachments/${attId}`),
   ask: (id: string, question: string) => request<{ answer: string; generated_by: string }>('POST', `/api/companies/${id}/assistant/ask`, { question }),
+  askWithFiles: (id: string, question: string, files: File[]) => {
+    const body = new FormData()
+    body.append('question', question)
+    body.append('consent', 'true')
+    files.forEach(file => body.append('files', file))
+    return request<{ answer: string; generated_by: string }>('POST', `/api/companies/${id}/assistant/ask-with-files`, body)
+  },
 }
 
 /** Файл вложения забираем с токеном: обычная ссылка не передала бы заголовок Authorization. */
