@@ -57,8 +57,18 @@ class _ModelCache:
             while len(self._data) > self._size:
                 self._data.popitem(last=False)
 
+    def remove_company(self, company_id: str) -> None:
+        with self._lock:
+            for key in list(self._data):
+                if key[0] == company_id:
+                    del self._data[key]
+
 
 _cache = _ModelCache()
+
+
+def forget_company_model(company_id: str) -> None:
+    _cache.remove_company(company_id)
 
 
 def _describe_current_shortfall(result: ForecastResult) -> ForecastResult:

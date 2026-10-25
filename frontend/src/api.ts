@@ -85,6 +85,7 @@ export const api = {
   },
   companies: () => request<Company[]>('GET', '/api/companies'),
   createCompany: (name: string) => request<Company>('POST', '/api/companies', { name }),
+  deleteCompany: (id: string) => request<void>('DELETE', `/api/companies/${id}`),
   company: (id: string) => request<Company>('GET', `/api/companies/${id}`),
   balance: (id: string) => request<AccountBalance>('GET', `/api/companies/${id}/balance`),
   setInitialBalance: (id: string, body: { date: string; amount: string }) => request<AccountBalance>('PUT', `/api/companies/${id}/balance/initial`, body),

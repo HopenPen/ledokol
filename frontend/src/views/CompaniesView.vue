@@ -1,10 +1,11 @@
 <script setup lang="ts">
 // Список компаний. Для нового пользователя главный экран — «Нужна одна загрузка»: файл выписки → компания → прогноз.
-import { ArrowRight, Building2, LogOut, Plus } from 'lucide-vue-next'
+import { ArrowRight, Building2, LogOut, Plus, Trash2 } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, ApiError, logout, type Company, type ImportResult } from '../api'
 import AppLogo from '../components/AppLogo.vue'
+import DeleteCompanyModal from '../components/DeleteCompanyModal.vue'
 import StatementUpload from '../components/StatementUpload.vue'
 import { plural } from '../format'
 
@@ -14,6 +15,8 @@ const error = ref('')
 const creating = ref(false)
 const busy = ref(false)
 const name = ref('')
+const deleting = ref<Company | null>(null)
+const notice = ref('')
 const importResults = ref<ImportResult[]>([])
 const imported = computed(() => importResults.value[0] ?? null)
 const importTotal = computed(() => importResults.value.reduce((sum, item) => sum + item.rows_total, 0))
@@ -48,6 +51,11 @@ function onImported(results: ImportResult[]) {
   }
 }
 function signOut() { logout(); router.push('/login') }
+function onDeleted(id: string) {
+  companies.value = companies.value.filter((company) => company.id !== id)
+  deleting.value = null
+  notice.value = 'Компания и все связанные с ней данные удалены'
+}
 </script>
 
 <template>
@@ -81,14 +89,16 @@ function signOut() { logout(); router.push('/login') }
           <p class="muted">{{ companies.length ? 'Выберите компанию или загрузите выписку новой.' : 'Загрузите выписку по расчётному счёту: сервис сам разложит платежи по категориям, найдёт регулярные и построит прогноз.' }}</p>
         </div>
         <p v-if="error" class="error" role="alert">{{ error }}</p>
+        <p v-if="notice" class="small" role="status">{{ notice }}</p>
 
         <ul v-if="companies.length" class="list">
-          <li v-for="c in companies" :key="c.id">
+          <li v-for="c in companies" :key="c.id" class="company-row">
             <RouterLink :to="`/companies/${c.id}`" class="card company">
               <Building2 class="c-ico" aria-hidden="true" />
               <span class="c-main"><b>{{ c.name }}</b><span class="tiny">{{ c.industry || 'Отрасль не указана' }}</span></span>
               <ArrowRight class="c-go" aria-hidden="true" />
             </RouterLink>
+            <button class="btn btn-ghost btn-icon btn-danger" :aria-label="`Удалить компанию «${c.name}»`" title="Удалить компанию" @click="deleting = c"><Trash2 /></button>
           </li>
         </ul>
 
@@ -107,6 +117,7 @@ function signOut() { logout(); router.push('/login') }
         <p v-if="loading" class="tiny">Загружаем…</p>
       </template>
     </main>
+    <DeleteCompanyModal v-if="deleting" :company="deleting" @close="deleting = null" @deleted="onDeleted" />
   </div>
 </template>
 
@@ -117,10 +128,11 @@ function signOut() { logout(); router.push('/login') }
 .head h1 { font-size: 32px; }
 .head p { max-width: 60ch; }
 .list { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.company-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
 .company { display: flex; align-items: center; gap: 16px; padding: 16px 20px; text-decoration: none; color: inherit; transition: border-color 150ms; }
 .company:hover { border-color: var(--brand); }
 .c-ico { width: 22px; height: 22px; color: var(--brand); flex: none; }
-.c-main { flex: 1; display: grid; }
+.c-main { flex: 1; min-width: 0; display: grid; overflow-wrap: anywhere; }
 .c-go { width: 18px; height: 18px; color: var(--ink-3); }
 .manual { display: grid; justify-items: start; }
 .create { width: min(420px, 100%); }

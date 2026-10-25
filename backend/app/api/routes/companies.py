@@ -1,7 +1,7 @@
 """Компании, загрузка выписки и главный экран (дашборд) одним запросом."""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, UploadFile, status
+from fastapi import APIRouter, HTTPException, Response, UploadFile, status
 from sqlalchemy import select
 from starlette.concurrency import run_in_threadpool
 
@@ -29,6 +29,7 @@ from app.domain.balances import BalanceError
 from app.domain.forecast import MODEL_VERSION
 from app.domain.ingest import StatementFormatError
 from app.services.balances import balance_status, set_initial_balance
+from app.services.companies import delete_company
 from app.services.forecasting import run_forecast
 from app.services.statements import import_statement
 
@@ -88,6 +89,12 @@ async def upload_statement(company: OwnedCompany, file: UploadFile, session: DbS
 @router.get("/{company_id}", response_model=CompanyOut)
 def get_company(company: OwnedCompany) -> Company:
     return company
+
+
+@router.delete("/{company_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_company(company: OwnedCompany, session: DbSession) -> Response:
+    delete_company(session, company)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.patch("/{company_id}", response_model=CompanyOut)
