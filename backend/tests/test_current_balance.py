@@ -1,7 +1,9 @@
 """Текущая нехватка денег не должна описываться как будущий риск."""
 import json
 from datetime import date
+from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from app.domain.types import ForecastResult
@@ -68,3 +70,13 @@ def test_current_balance_headline_does_not_leak_precise_amount_to_llm():
     assert context["balance_now"] == 0
     assert "125,50" not in context["headline"]
     assert context["first_recovery_date"] is None
+
+
+def test_llm_context_serializes_numpy_alert_flag():
+    day = date(2026, 10, 23)
+    alert = SimpleNamespace(start=day, end=day, probability=0.6, shortfall=2500,
+                            worst_case=np.bool_(True), causes=[], actions=[])
+    result = ForecastResult(as_of=day, last_balance=1000, threshold=0, points=[], events=[],
+                            alerts=[alert], headline="Возможна нехватка")
+    context = json.loads(build_context(result))
+    assert context["gaps"][0]["only_in_bad_case"] is True

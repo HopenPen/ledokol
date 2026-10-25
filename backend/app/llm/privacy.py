@@ -32,7 +32,7 @@ def build_context(res: ForecastResult) -> str:
         "min_p50": _round(min(p.p50 for p in res.points)) if res.points else None,
         "gaps": [{
             "start": a.start.isoformat(), "end": a.end.isoformat(), "probability": round(a.probability, 2),
-            "shortfall": _round(a.shortfall), "only_in_bad_case": a.worst_case,
+            "shortfall": _round(a.shortfall), "only_in_bad_case": bool(a.worst_case),
             "main_payments": [{"category": label(c.category), "amount": _round(c.amount),
                                "date": c.event_date.isoformat(), "source": c.source.value} for c in a.causes],
             # тексты рекомендаций не передаём: в них есть названия контрагентов. Только типы действий.
