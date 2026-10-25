@@ -114,7 +114,7 @@ const QUALITY_HINT: Record<string, string> = { duplicate: 'дубль', after_ga
           <span class="r-date num">{{ shortDate(op.op_date) }}</span>
           <span class="r-main">
             <span class="r-name">{{ op.counterparty_name }}</span>
-            <span class="r-purpose">{{ op.purpose || 'Без назначения' }}</span>
+            <span v-if="op.purpose" class="r-purpose">{{ op.purpose }}</span>
           </span>
           <span class="r-tags">
             <span class="chip">{{ op.category_label }}</span>

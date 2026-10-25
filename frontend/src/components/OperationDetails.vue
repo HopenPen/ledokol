@@ -53,7 +53,7 @@ const QUALITY: Record<string, string> = { duplicate: 'Дубль выгрузк�
 <template>
   <div class="details">
     <dl class="meta">
-      <div class="m-wide"><dt>Назначение платежа</dt><dd>{{ op.purpose || '—' }}</dd></div>
+      <div v-if="op.purpose" class="m-wide"><dt>Назначение платежа</dt><dd>{{ op.purpose }}</dd></div>
       <div><dt>Контрагент</dt><dd>{{ op.counterparty_name }}<span v-if="op.counterparty_inn" class="tiny"> · ИНН {{ op.counterparty_inn }}</span></dd></div>
       <div><dt>Остаток на конец дня</dt><dd class="num">{{ op.balance_eod === null ? 'Неизвестен' : money(op.balance_eod) }}</dd></div>
       <div><dt>Откуда операция</dt><dd>{{ op.source === 'manual' ? 'Добавлена вручную' : 'Банковская выписка' }}</dd></div>

@@ -26,7 +26,7 @@ export interface EventRow { id: string; event_date: string; amount: string; dire
 export interface Operation { id: string; op_date: string; amount: string; direction: string; counterparty_name: string; purpose: string; category: string; category_label: string; category_source: string; quality: string; counterparty_inn: string | null; balance_eod: string | null; source: 'manual' | 'statement' }
 export interface ImportResult { company: Company; rows_total: number; rows_new: number; rows_matched: number; already_imported: boolean; quality: { rows_rejected: number; rows_total: number; duplicates: number; balance_jumps: number; empty_purpose: number; empty_inn: number; history_working_days: number; warnings: string[] } }
 export interface RegistrationInfo { email_delivery: 'disabled' | 'unavailable' | 'local' | 'smtp'; local_mailbox_url: string | null }
-export interface PaymentInput { op_date: string; amount: string; direction: 'in' | 'out'; counterparty_name: string; counterparty_inn: string; purpose: string }
+export interface PaymentInput { op_date: string; amount: string; direction: 'in' | 'out'; counterparty_name: string; counterparty_inn: string }
 export interface AccountBalance {
   amount: string | null; as_of: string | null; source: 'unknown' | 'initial' | 'statement' | 'legacy' | 'calculated'
   anchor_date: string | null; anchor_source: 'initial' | 'statement' | 'legacy' | null

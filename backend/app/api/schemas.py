@@ -145,7 +145,7 @@ class PaymentIn(_In):
     direction: Literal["in", "out"]
     counterparty_name: str = Field(min_length=1, max_length=300)
     counterparty_inn: str = Field(default="", pattern=r"^(?:\d{10}|\d{12})?$")
-    purpose: str = Field(min_length=1, max_length=2000)
+    purpose: str = Field(default="", max_length=2000)
     balance_eod: Decimal | None = Field(default=None, max_digits=16, decimal_places=2, deprecated=True)
 
     @field_validator("op_date")

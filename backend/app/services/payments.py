@@ -22,7 +22,7 @@ class NewPayment:
     amount: Decimal
     direction: str
     counterparty_name: str
-    purpose: str
+    purpose: str = ""
     balance_eod: Decimal | None = None  # Совместимость со старым API; новая форма это поле не отправляет.
     counterparty_inn: str = ""
 

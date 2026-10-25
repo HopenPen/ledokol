@@ -16,7 +16,6 @@ const direction = ref<'in' | 'out'>('out')
 const amount = ref('')
 const name = ref('')
 const inn = ref('')
-const purpose = ref('')
 const receipt = ref<File[]>([])
 const related = ref<File[]>([])
 const busy = ref(false)
@@ -33,7 +32,7 @@ async function save() {
   try {
     const op = await api.addPayment(props.companyId, {
       op_date: opDate.value, amount: String(amount.value), direction: direction.value,
-      counterparty_name: name.value.trim(), counterparty_inn: inn.value.trim(), purpose: purpose.value.trim(),
+      counterparty_name: name.value.trim(), counterparty_inn: inn.value.trim(),
     }, key)
     let warning = ''
     try {
@@ -75,7 +74,6 @@ async function save() {
           <label class="field">ИНН контрагента <span class="hint">Необязательно, 10 или 12 цифр</span>
             <input v-model="inn" inputmode="numeric" pattern="(?:\d{10}|\d{12})?" maxlength="12" />
           </label>
-          <label class="field">Назначение платежа <input v-model="purpose" maxlength="2000" required /></label>
           <p class="small muted">Остаток пересчитается автоматически. Если он пока неизвестен, начальную сумму можно указать отдельно в «Источниках».</p>
           <div class="files">
             <FilePicker v-model="receipt" label="Чек" hint="Чек или платёжное поручение, один файл. Необязательно" />

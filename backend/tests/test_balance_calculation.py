@@ -19,10 +19,12 @@ def account(client):
     return client, headers, f"/api/companies/{cid}"
 
 
-def payment(account, day="2026-09-01", amount="100.25", direction="in", key=None, **changes):
+def payment(account, day="2026-09-01", amount="100.25", direction="in", key=None, omit_purpose=False, **changes):
     client, headers, path = account
     body = {"op_date": day, "amount": amount, "direction": direction,
             "counterparty_name": "Клиент", "counterparty_inn": "0011111111", "purpose": "Оплата по счёту 1", **changes}
+    if omit_purpose:
+        body.pop("purpose")
     return client.post(path + "/operations", headers={**headers, **({"Idempotency-Key": key} if key else {})}, json=body)
 
 
@@ -111,10 +113,11 @@ def test_initial_balance_validation_ownership_and_earlier_payments(account):
 
 
 @pytest.mark.parametrize("manual_inn", ["", "0011111111"])
-def test_statement_confirms_manual_payment_preserving_id_category_files_and_retry(account, manual_inn):
+@pytest.mark.parametrize("omit_purpose", [False, True])
+def test_statement_confirms_manual_payment_preserving_id_category_files_and_retry(account, manual_inn, omit_purpose):
     client, headers, path = account
     initial(account)
-    saved = payment(account, key="keep-id", counterparty_inn=manual_inn).json()
+    saved = payment(account, key="keep-id", counterparty_inn=manual_inn, omit_purpose=omit_purpose).json()
     op_id = saved["id"]
     client.patch(f"/api/operations/{op_id}/category", headers=headers,
                  json={"category": "suppliers", "apply_to_counterparty": False})
@@ -128,11 +131,77 @@ def test_statement_confirms_manual_payment_preserving_id_category_files_and_retr
     assert len(actual) == 1 and actual[0]["id"] == op_id and actual[0]["source"] == "statement"
     assert actual[0]["category_source"] == "user" and actual[0]["category"] == "suppliers"
     assert client.get(f"/api/operations/{op_id}/attachments", headers=headers).json()[0]["id"] == receipt.json()[0]["id"]
-    retry = payment(account, key="keep-id", counterparty_inn=manual_inn)
+    retry = payment(account, key="keep-id", counterparty_inn=manual_inn, omit_purpose=omit_purpose)
     assert retry.status_code == 200 and retry.json()["id"] == op_id
     assert upload(account, [bank_row()]).json()[0]["already_imported"]
     assert client.get(path + "/forecast", headers=headers).json()["last_balance"] == 1100.25
     assert client.get(path + "/balance", headers=headers).json()["source"] == "statement"
+
+
+def test_manual_without_purpose_can_be_saved_and_classified_from_bank_history(account):
+    client, headers, path = account
+    initial(account)
+    saved = payment(account, direction="out", key="blank", omit_purpose=True)
+    assert saved.status_code == 201, saved.text
+    assert saved.json()["purpose"] == "" and saved.json()["category"] == "unknown"
+    repeated = payment(account, direction="out", key="blank", purpose="")
+    assert repeated.status_code == 200 and repeated.json()["id"] == saved.json()["id"]
+    with SessionLocal() as session:
+        assert session.get(Operation, saved.json()["id"]).purpose == ""
+    imported = upload(account, [bank_row(direction="Списание", payment_purpose="Оплата аренды за сентябрь",
+                                       balance_eod="899.75")])
+    assert imported.status_code == 200 and imported.json()[0]["rows_matched"] == 1
+    known = client.get(path + "/operations", headers=headers).json()[0]
+    assert known["category"] == "rent" and known["purpose"] == "Оплата аренды за сентябрь"
+    next_payment = payment(account, day="2026-09-02", direction="out", amount="50", omit_purpose=True)
+    assert next_payment.status_code == 201
+    assert next_payment.json()["category"] == "rent" and next_payment.json()["category_source"] == "counterparty"
+    assert next_payment.json()["purpose"] == "" and next_payment.json()["balance_eod"] == "849.75"
+    assert client.get(path + "/forecast", headers=headers).json()["last_balance"] == 849.75
+
+
+@pytest.mark.parametrize("manual_count,bank_count", [(1, 2), (2, 1), (2, 2)])
+def test_reconciliation_without_purpose_rejects_ambiguous_matches(account, manual_count, bank_count):
+    client, headers, path = account
+    initial(account)
+    for _ in range(manual_count):
+        assert payment(account, omit_purpose=True).status_code == 201
+    response = upload(account, [bank_row(operation_id=f"bank-{i}", payment_purpose=f"Оплата по договору {i}",
+                                       balance_eod=str(Decimal(1000) + Decimal("100.25") * bank_count))
+                                for i in range(bank_count)])
+    assert response.status_code == 422 and "однозначно" in response.json()["detail"]
+    operations = client.get(path + "/operations", headers=headers).json()
+    assert len(operations) == manual_count and all(op["source"] == "manual" for op in operations)
+    assert Decimal(client.get(path + "/balance", headers=headers).json()["amount"]) == Decimal(1000) + Decimal("100.25") * manual_count
+    with SessionLocal() as session:
+        assert not session.scalars(select(BalancePoint).where(BalancePoint.kind == "statement")).all()
+
+
+def test_exact_purpose_match_has_priority_over_missing_purpose(account):
+    client, headers, path = account
+    initial(account)
+    exact = payment(account).json()
+    blank = payment(account, omit_purpose=True).json()
+    imported = upload(account, [bank_row(operation_id="exact", balance_eod="1200.50"),
+                                bank_row(operation_id="other", payment_purpose="Оплата по счёту 2", balance_eod="1200.50")])
+    assert imported.status_code == 200, imported.text
+    assert imported.json()[0]["rows_matched"] == 2 and imported.json()[0]["rows_new"] == 0
+    with SessionLocal() as session:
+        assert session.get(Operation, exact["id"]).source_operation_id == "exact"
+        assert session.get(Operation, blank["id"]).source_operation_id == "other"
+    assert len(client.get(path + "/operations", headers=headers).json()) == 2
+
+
+def test_missing_purpose_does_not_merge_different_counterparties(account):
+    client, headers, path = account
+    initial(account)
+    saved = payment(account, omit_purpose=True).json()
+    response = upload(account, [bank_row(counterparty_inn="0022222222")])
+    assert response.status_code == 200
+    assert response.json()[0]["rows_matched"] == 0 and response.json()[0]["rows_new"] == 1
+    operations = client.get(path + "/operations", headers=headers).json()
+    assert len(operations) == 2
+    assert next(op for op in operations if op["id"] == saved["id"])["source"] == "manual"
 
 
 def test_bank_anchor_is_authoritative_and_does_not_count_same_day_payments_twice(account):

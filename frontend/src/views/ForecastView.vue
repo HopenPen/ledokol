@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Главная: ответ одной фразой → три цифры → график → разрывы с причинами и действиями → ближайшие платежи.
+// Главная: три цифры → график и вывод → разрывы с причинами и действиями → ближайшие платежи.
 import { CalendarPlus } from 'lucide-vue-next'
 import { computed, inject, ref, watch, type Ref } from 'vue'
 import { useRoute } from 'vue-router'
@@ -72,12 +72,6 @@ async function onSaved() {
   </div>
 
   <div v-else-if="f && dashboard" class="home">
-    <section class="answer" :class="tone">
-      <h1>{{ f.headline }}</h1>
-      <p v-if="f.low_history" class="note">Истории пока мало, поэтому прогноз приблизительный.</p>
-      <p v-for="w in f.warnings" :key="w" class="note">{{ w }}</p>
-    </section>
-
     <section class="kpis" aria-label="Главные цифры">
       <div class="kpi">
         <p class="k-label">На счёте сейчас</p>
@@ -112,6 +106,11 @@ async function onSaved() {
         <div :class="{ dim: loadingLonger }">
           <BalanceChart :history="dashboard.history" :points="f.points" :threshold="f.threshold" :events="f.events" :alerts="f.alerts" />
         </div>
+        <section class="answer" :class="tone">
+          <h1>{{ f.headline }}</h1>
+          <p v-if="f.low_history" class="note">Истории пока мало, поэтому прогноз приблизительный.</p>
+          <p v-for="w in f.warnings" :key="w" class="note">{{ w }}</p>
+        </section>
       </section>
 
       <section class="side" aria-labelledby="alerts-title">
@@ -156,7 +155,7 @@ async function onSaved() {
 <style scoped>
 .loading { display: grid; gap: 16px; }
 .home { display: grid; gap: 20px; }
-.answer { padding-left: 20px; border-left: 4px solid var(--brand); }
+.answer { margin-top: 20px; padding-left: 20px; border-left: 4px solid var(--brand); }
 .answer.warn { border-left-color: var(--warn); }
 .answer.risk { border-left-color: var(--risk); }
 .answer h1 { font-size: clamp(26px, 3.4vw, 38px); line-height: 1.15; max-width: 28ch; font-weight: 700; letter-spacing: -0.025em; }

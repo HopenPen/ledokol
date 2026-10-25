@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import hashlib
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -88,16 +88,21 @@ def _same_counterparty(inn_a, name_a, inn_b, name_b):
 
 
 def _merge_operations(session: Session, company: Company, fresh) -> tuple[int, int]:
-    """Точное совпадение факта с выпиской подтверждает существующую карточку вместе с файлами."""
+    """Сначала точные совпадения, затем однозначные ручные платежи без назначения."""
     manual = defaultdict(list)
+    without_purpose = []
     for op in session.scalars(select(Operation).where(Operation.company_id == company.id,
                                                       Operation.source_operation_id.startswith("manual:"))
                              .order_by(Operation.source_operation_id)):
-        manual[_signature(op.op_date, op.amount, op.direction, op.purpose)].append(op)
+        if _normalize(op.purpose):
+            manual[_signature(op.op_date, op.amount, op.direction, op.purpose)].append(op)
+        else:
+            without_purpose.append(op)
     incoming = defaultdict(list)
     for row in fresh.itertuples(index=False):
         incoming[_signature(row.operation_date.date(), row.amount, row.direction, row.payment_purpose)].append(row)
     created = matched = 0
+    pending = []
     for signature, rows in incoming.items():
         available = manual.get(signature, []).copy()
         for index, row in enumerate(rows):
@@ -113,16 +118,42 @@ def _merge_operations(session: Session, company: Company, fresh) -> tuple[int, i
                 available.remove(operation)
                 matched += 1
             else:
-                operation = Operation(company_id=company.id)
-                session.add(operation)
-                created += 1
-            operation.source_operation_id = row.operation_id
-            operation.op_date = row.operation_date.date()
-            operation.amount, operation.direction = Decimal(str(row.amount)), row.direction
-            operation.counterparty_inn, operation.counterparty_name = row.counterparty_inn or None, row.counterparty_name
-            operation.purpose = row.payment_purpose
-            operation.balance_eod = Decimal(str(row.balance_eod))
+                pending.append(row)
+                continue
+            _apply_statement_row(operation, row)
+    candidates = {row.operation_id: [op for op in without_purpose if _same_payment_without_purpose(op, row)]
+                  for row in pending}
+    uses = Counter(op.id for options in candidates.values() for op in options)
+    for row in pending:
+        options = candidates[row.operation_id]
+        if len(options) > 1 or any(uses[op.id] > 1 for op in options):
+            raise StatementFormatError("Нельзя однозначно сопоставить ручной платёж без назначения с выпиской: "
+                                       "совпадают несколько операций по дате, сумме, направлению и контрагенту. "
+                                       "Проверьте ручные платежи и выписку.")
+        if options:
+            operation = options[0]
+            matched += 1
+        else:
+            operation = Operation(company_id=company.id)
+            session.add(operation)
+            created += 1
+        _apply_statement_row(operation, row)
     return created, matched
+
+
+def _same_payment_without_purpose(operation: Operation, row) -> bool:
+    return (operation.op_date == row.operation_date.date() and operation.amount == Decimal(str(row.amount))
+            and operation.direction == row.direction and _same_counterparty(
+                operation.counterparty_inn, operation.counterparty_name, row.counterparty_inn, row.counterparty_name))
+
+
+def _apply_statement_row(operation: Operation, row) -> None:
+    operation.source_operation_id = row.operation_id
+    operation.op_date = row.operation_date.date()
+    operation.amount, operation.direction = Decimal(str(row.amount)), row.direction
+    operation.counterparty_inn, operation.counterparty_name = row.counterparty_inn or None, row.counterparty_name
+    operation.purpose = row.payment_purpose
+    operation.balance_eod = Decimal(str(row.balance_eod))
 
 
 def _target(session: Session, user: User, external: str, parsed: ParsedImport, selected: Company | None) -> Company:
