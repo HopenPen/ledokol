@@ -49,7 +49,7 @@ async function afterImport(results: ImportResult[]) {
     <div class="head">
       <div>
         <h1>План-факт</h1>
-        <p class="muted small">Насколько сбылся прошлый прогноз и пришли ли ожидаемые деньги.</p>
+        <p class="muted small"> Пришли ли ожидаемые поступления и сравнение с прогнозом.</p>
       </div>
       <StatementUpload :company-id="id" label="Загрузить новую выписку" @imported="afterImport" @error="toast" />
     </div>
@@ -58,7 +58,7 @@ async function afterImport(results: ImportResult[]) {
     <section class="card">
       <div class="card-head"><h2>Ожидали и было</h2>
         <span v-if="daily?.run" class="chip" :class="daily.flagged_days ? 'chip-risk' : 'chip-brand'">
-          {{ daily.flagged_days ? `необычных дней: ${daily.flagged_days}` : 'всё в пределах разброса' }}
+          {{ daily.flagged_days ? `кол-во отсутсвующих платежей: ${daily.flagged_days}` : 'всё в пределах разброса' }}
         </span>
       </div>
       <div v-if="loading" class="skeleton" style="height: 300px" />
