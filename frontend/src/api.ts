@@ -48,7 +48,12 @@ function setToken(t: string | null) {
 export const isLoggedIn = () => token !== null
 // Вход через банк появится на бэкенде позже: адрес задаётся при сборке, пока его нет — кнопка неактивна.
 export const SSO_CENTRINVEST_URL: string = import.meta.env.VITE_SSO_CENTRINVEST_URL ?? ''
-export const logout = () => setToken(null)
+export const logout = () => {
+  setToken(null)
+  try {
+    Object.keys(sessionStorage).filter(key => key.startsWith('cashflow.chat.')).forEach(key => sessionStorage.removeItem(key))
+  } catch { /* storage may be unavailable */ }
+}
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message) }

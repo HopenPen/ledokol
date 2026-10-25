@@ -2,13 +2,27 @@
 // Ассистент «спросить о своих деньгах» сохраняется (требование продукта). Он видит только обезличенную
 // сводку прогноза; назначения платежей, названия контрагентов и вложения к нему не попадают.
 import { Send, X } from 'lucide-vue-next'
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api, ApiError } from '../api'
 
 const props = defineProps<{ companyId: string }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 const question = ref('')
-const history = ref<{ q: string; a: string; by: string }[]>([])
+type Message = { q: string; a: string; by: string }
+const storageKey = `cashflow.chat.${props.companyId}`
+function savedHistory(): Message[] {
+  try {
+    const saved: unknown = JSON.parse(sessionStorage.getItem(storageKey) ?? '[]')
+    if (!Array.isArray(saved)) return []
+    return saved.filter((m): m is Message => m && typeof m.q === 'string' && typeof m.a === 'string' && typeof m.by === 'string')
+      .slice(-50).map(m => m.a ? m : { ...m, a: 'Ответ был прерван. Отправьте вопрос ещё раз.', by: 'error' })
+  } catch { return [] }
+}
+const history = ref<Message[]>(savedHistory())
+function persistHistory() {
+  try { sessionStorage.setItem(storageKey, JSON.stringify(history.value.slice(-50))) } catch { /* storage may be unavailable */ }
+}
+watch(history, persistHistory, { deep: true, flush: 'sync' })
 const busy = ref(false)
 const log = ref<HTMLDivElement | null>(null)
 const input = ref<HTMLInputElement | null>(null)
@@ -28,6 +42,7 @@ async function send(q = question.value) {
   } catch (e) {
     Object.assign(history.value[index], { a: e instanceof ApiError ? e.message : 'Не получилось ответить', by: 'error' })
   } finally {
+    persistHistory()
     busy.value = false
     await nextTick()
     log.value?.scrollTo({ top: log.value.scrollHeight })
