@@ -47,8 +47,13 @@ function onImported(results: ImportResult[]) {
   importResults.value = results
   companies.value = [...new Map([...companies.value, ...results.map((item) => item.company)].map((item) => [item.id, item])).values()]
   if (results.length === 1 && !rejected.value) {
-    redirectTimer = window.setTimeout(() => router.push(`/companies/${results[0].company.id}`), 1600)
+    redirectTimer = window.setTimeout(() => { void openForecast(results[0].company.id) }, 1600)
   }
+}
+async function openForecast(id: string) {
+  const path = `/companies/${id}`
+  try { await router.push(path) }
+  catch { window.location.assign(path) }
 }
 function signOut() { logout(); router.push('/login') }
 function onDeleted(id: string) {
@@ -76,11 +81,9 @@ function onDeleted(id: string) {
         </ul>
         <p v-if="rejected" class="error" role="alert">Строк с ошибками пропущено: {{ rejected }}. Проверьте исходный файл.</p>
         <p v-for="warning in importWarnings" :key="warning" class="small muted">{{ warning }}</p>
-        <p v-if="importResults.length === 1 && !rejected" class="muted">Строим прогноз…</p>
-        <template v-else>
-          <RouterLink v-for="item in importResults" :key="item.company.id" class="btn" :to="`/companies/${item.company.id}`">{{ item.company.name }} — перейти к прогнозу</RouterLink>
-          <button class="btn btn-ghost" @click="importResults = []">К списку компаний</button>
-        </template>
+        <p v-if="importResults.length === 1 && !rejected" class="muted">Выписка готова. Открываем прогноз…</p>
+        <a v-for="item in importResults" :key="item.company.id" class="btn" :href="`/companies/${item.company.id}`">{{ item.company.name }} — перейти к прогнозу</a>
+        <button class="btn btn-ghost" @click="importResults = []">К списку компаний</button>
       </section>
 
       <template v-else>
