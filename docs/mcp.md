@@ -71,13 +71,13 @@ read-only аннотации, вызовы и запрет доступа к ч�
 помечены как read-only. Пример запроса: «Покажи мои компании, затем прогноз разрыва;
 сравни его со сценарием падения выручки на 20%».
 
-## Qwen через RouterAI
+## Модель через RouterAI
 
 CLI-мост требует MCP SDK 2.x (версия в lock-файле). В локальном `backend/.env`:
 
 ```dotenv
 CASHFLOW_LLM_BASE_URL=https://routerai.ru/api/v1
-CASHFLOW_LLM_MODEL=qwen/qwen3.7-flash
+CASHFLOW_LLM_MODEL=anthropic/claude-opus-5.5
 CASHFLOW_LLM_API_KEY=<ключ>
 ```
 
