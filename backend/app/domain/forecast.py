@@ -21,6 +21,7 @@ import pandas as pd
 
 from app.domain.calendar import working_days_after
 from app.domain.categories import EXCLUDED_FROM_FORECAST, RETAIL
+from app.domain.invoices import has_invoice
 from app.domain.recurring import RecurringSeries, detect_recurring, project_series
 from app.domain.risk import build_headline, detect_gaps
 from app.domain.scenarios import Scenario, apply_to_events
@@ -48,14 +49,23 @@ class FittedModel:
     history_wd: int
     ops: pd.DataFrame = field(repr=False)
     model_version: str = MODEL_VERSION
+    dropped: frozenset = frozenset()   # отключённые источники (только для аблации в бэктесте): recurring, taxes
 
     @property
     def low_history(self) -> bool:
         return self.history_wd < _LOW_HISTORY_WD
 
 
-def fit(ops: pd.DataFrame, panel: pd.DataFrame, as_of: date | None = None) -> FittedModel:
-    """ops — категоризированные операции одной компании (после flag_quality), panel — дневной остаток."""
+def fit(ops: pd.DataFrame, panel: pd.DataFrame, as_of: date | None = None,
+        drop: frozenset = frozenset(), invoice_aware: bool = False) -> FittedModel:
+    """ops — категоризированные операции одной компании (после flag_quality), panel — дневной остаток.
+
+    drop — какие источники будущих событий отключить, чтобы в бэктесте измерить их вклад (аблация):
+    «recurring» — без детектора регулярных платежей, «taxes» — без налогового календаря. Отключённое не пропадает
+    из прогноза совсем, а уходит в «размазанный» статистический слой C: сравнение честное — «поштучно» против «средним».
+    invoice_aware — платежи со ссылкой на счёт (номер и дата в назначении) не входят в слой C: их ставит поштучно
+    реестр счетов (domain/invoices.py), иначе одни и те же деньги посчитаны дважды — в среднем и в событии.
+    """
     ops = ops[ops["balance_eod"].notna()]
     if as_of is not None:
         cut = pd.Timestamp(as_of)
@@ -64,12 +74,15 @@ def fit(ops: pd.DataFrame, panel: pd.DataFrame, as_of: date | None = None) -> Fi
         raise ValueError("Нет истории для прогноза")
     as_of = panel["date"].iloc[-1].date()
     good = ops[ops["quality"].isin(["ok", "after_gap"])]
-    recurring = detect_recurring(good, as_of)
+    recurring = [] if "recurring" in drop else detect_recurring(good, as_of)
     members = {i for s in recurring for i in s.member_index}
 
     is_retail = good["category"].isin(RETAIL)
-    is_other = (~is_retail & ~good["category"].isin(EXCLUDED_FROM_FORECAST | {"tax"})
+    skip = EXCLUDED_FROM_FORECAST if "taxes" in drop else EXCLUDED_FROM_FORECAST | {"tax"}
+    is_other = (~is_retail & ~good["category"].isin(skip)
                 & ~good.index.isin(list(members)) & ~_one_offs(good))
+    if invoice_aware:
+        is_other &= ~has_invoice(good["payment_purpose"])
     days = pd.DatetimeIndex(panel["date"])
     retail =good[is_retail].groupby("operation_date")["signed"].sum().reindex(days, fill_value=0.0)
     other_in = good[is_other & good["direction"].eq("in")].groupby("operation_date")["amount"].sum() \
@@ -103,14 +116,15 @@ def fit(ops: pd.DataFrame, panel: pd.DataFrame, as_of: date | None = None) -> Fi
     return FittedModel(
         as_of=as_of, last_balance=float(panel["balance"].iloc[-1]), recurring=recurring, revenue_dow=revenue_dow,
         other_in_mean=oin, other_out_mean=oout, residual_pool=pool, client_shares=shares.to_dict(),
-        top_clients=top, history_wd=history_wd, ops=good,
+        top_clients=top, history_wd=history_wd, ops=good, dropped=frozenset(drop),
     )
 
 
 def known_events(m: FittedModel, planned: list[PlannedEvent], horizon_end: date) -> list[PlannedEvent]:
     """Слой A. Ручное событие/счёт заменяет совпадающий регулярный платёж, а не дублирует его (FR-3.4)."""
     projected = [e for s in m.recurring for e in project_series(s, m.as_of, horizon_end)]
-    projected += project_taxes(m.ops, m.as_of, horizon_end)
+    if "taxes" not in m.dropped:
+        projected += project_taxes(m.ops, m.as_of, horizon_end)
     planned = [e for e in planned if m.as_of < e.event_date <= horizon_end]
 
     def covered(e: PlannedEvent) -> bool:
@@ -154,10 +168,10 @@ def forecast(m: FittedModel, planned: list[PlannedEvent] | None = None, *, horiz
         np.add.at(flows, (rows[hit], np.broadcast_to(cols, n_sims)[hit]), e.signed)
 
     paths = m.last_balance + np.cumsum(flows, axis=1)
-    q10, q50, q90 = np.quantile(paths, [0.1, 0.5, 0.9], axis=0)
+    q10, q25, q50, q75, q90 = np.quantile(paths, [0.1, 0.25, 0.5, 0.75, 0.9], axis=0)
     below = (paths < threshold).mean(axis=0)
-    points = [ForecastPoint(d, float(a), float(b), float(c), float(p))
-              for d, a, b, c, p in zip(days, q10, q50, q90, below)]
+    points = [ForecastPoint(d, float(a), float(b), float(c), float(p), float(lo), float(hi))
+              for d, a, b, c, p, lo, hi in zip(days, q10, q50, q90, below, q25, q75)]
     alerts = detect_gaps(days, paths, events, threshold)
     return ForecastResult(
         as_of=m.as_of, last_balance=m.last_balance, threshold=threshold, points=points, events=events,

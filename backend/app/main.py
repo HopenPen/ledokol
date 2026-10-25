@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.routes import attachments, auth, companies, operations, planning
+from app.api.routes import attachments, auth, companies, ml_models, ml_risk, operations, planning
 from app.core.config import get_settings
 from app.core.logging import setup_logging
 from app.domain.categories import CATEGORIES
@@ -72,7 +72,7 @@ def create_app() -> FastAPI:
         return [{"code": c.code, "label": c.label, "mandatory": c.mandatory, "role": c.role.value}
                 for c in CATEGORIES.values()]
 
-    for r in (auth.router, companies.router, operations.router, planning.router, attachments.router):
+    for r in (auth.router, companies.router, operations.router, planning.router, attachments.router, ml_risk.router, ml_models.router):
         app.include_router(r, prefix="/api")
     return app
 

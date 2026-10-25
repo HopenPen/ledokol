@@ -12,6 +12,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.security import decode_access_token
 from app.db.models import Company, Operation, OperationAttachment, User
 from app.db.session import get_session
@@ -24,8 +25,20 @@ def current_user(session: DbSession,
                  creds: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)]) -> User:
     user_id = decode_access_token(creds.credentials) if creds else None
     user = session.get(User, user_id) if user_id else None
+    if user is None and get_settings().dev_no_auth:
+        return _dev_user(session)
     if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Требуется вход", headers={"WWW-Authenticate": "Bearer"})
+    return user
+
+
+def _dev_user(session: Session) -> User:
+    """Локальный просмотр без входа (CASHFLOW_DEV_NO_AUTH=1): один общий пользователь с непригодным для входа паролем."""
+    user = session.scalar(select(User).where(User.login == "dev"))
+    if user is None:
+        user = User(login="dev", password_hash="!")
+        session.add(user)
+        session.commit()
     return user
 
 

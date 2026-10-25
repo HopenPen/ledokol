@@ -56,6 +56,8 @@ class ForecastPoint:
     p50: float
     p90: float
     prob_below: float  # доля траекторий ниже порога в этот день
+    p25: float | None = None   # «обычный» коридор P25–P75; P10–P90 остаётся для плана-факта и риска
+    p75: float | None = None
 
 
 @dataclass(slots=True)

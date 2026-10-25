@@ -27,7 +27,7 @@ class ImportResult:
 
 
 def import_statement(session: Session, user: User, raw: bytes, company: Company | None = None,
-                     filename: str = "statement.csv") -> list[ImportResult]:
+                     filename: str = "statement.csv", *, commit: bool = True) -> list[ImportResult]:
     parsed = parse_statement(raw, filename)
     digest, results = hashlib.sha256(raw).hexdigest(), []
     try:
@@ -75,7 +75,10 @@ def import_statement(session: Session, user: User, raw: bytes, company: Company 
                 result.quality.rows_rejected = rejected
                 result.quality.warnings.append(
                     f"В файле пропущено строк: {rejected}. Номера записей CSV: {lines}. Проверьте поля: {fields}")
-        session.commit()
+        if commit:
+            session.commit()
+        else:
+            session.flush()
         return results
     except Exception:
         session.rollback()

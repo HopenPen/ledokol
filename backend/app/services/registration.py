@@ -81,6 +81,10 @@ def register(session: Session, email: str, password: str, mailer: VerificationMa
         token = _issue(identity, now) if get_settings().require_email_verification else None
         session.add(identity)
         session.flush()
+        if get_settings().signup_demo_companies:
+            from app.services.signup_demo import seed_user_demo
+
+            seed_user_demo(session, user)
         if token is not None:
             _deliver(mailer, identity, token)
         session.commit()

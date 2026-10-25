@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from app.domain.ml_flow import adversarial_filter, make_rows, mix_weights
+from app.domain.ml_flow import adversarial_filter, make_cum_rows, make_rows, mix_weights
 
 
 def _flow(seed: int, scale: float = 1.0, shift: float = 0.0, n: int = 200) -> pd.Series:
@@ -17,8 +17,9 @@ def _flow(seed: int, scale: float = 1.0, shift: float = 0.0, n: int = 200) -> pd
 def test_rows_do_not_depend_on_company_scale():
     small = make_rows(_flow(1, scale=50_000), "Общепит")
     big = make_rows(_flow(1, scale=50_000_000), "Общепит")
-    num = small.select_dtypes("number").columns
+    num = small.select_dtypes("number").columns.drop("scale")   # scale — единственное, что обязано отличаться
     assert np.allclose(small[num], big[num])
+    assert np.allclose(big["scale"] / small["scale"], 1000)
 
 
 def test_case_keeps_half_of_total_weight_even_when_outnumbered():
@@ -42,3 +43,21 @@ def test_adversarial_filter_drops_unlike_windows_keeps_like_ones():
     kept_like = len(adversarial_filter(case, like)) / len(like)
     kept_unlike = len(adversarial_filter(case, unlike)) / len(unlike)
     assert kept_like > 0.7 and kept_unlike < 0.1
+
+
+def test_cum_rows_target_is_sum_and_lags_stay_in_the_past():
+    flow = _flow(3, scale=1000.0)
+    rows = make_cum_rows(flow, "Опт", step=10, company="c")
+    r = rows[rows["h"].eq(30)].iloc[0]
+    t = flow.index.get_loc(r["cutoff"])
+    assert np.isclose(r["y"] * r["scale"], flow.iloc[t + 1: t + 31].sum())
+    # lag1 для h=30 — то же окно на 42 рабочих дня раньше; оно обязано закончиться до отсечки
+    assert np.isclose(r["lag1"] * r["scale"], flow.iloc[t - 41: t - 11].sum())
+
+
+def test_cum_rows_stop_before_evaluation_period():
+    flow = _flow(4)
+    limit = flow.index[150]
+    rows = make_cum_rows(flow, "Опт", step=5, max_target_date=limit)
+    ends = [flow.index[flow.index.get_loc(c) + h] for c, h in zip(rows["cutoff"], rows["h"])]
+    assert max(ends) < limit

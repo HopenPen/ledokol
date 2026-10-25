@@ -3,6 +3,7 @@
     cashflow predict --input statements/ --out results/
     cashflow backtest --input all_operations.csv --out backtest/
     cashflow seed-demo --input statements/ --companies C009,C066,C082
+    cashflow train-tabpfn --dataset gap_v2_dataset.csv --scores gap_tabpfn_scores.csv   # необязательный ML-модуль
 """
 from __future__ import annotations
 
@@ -150,6 +151,46 @@ def train_classifier_cmd(input: Path = typer.Option(..., exists=True)) -> None:
     preps = [prepare_company(df) for df in split_by_company(_load(input)).values()]
     path = save_classifier(train_classifier(pd.concat([p.ops for p in preps], ignore_index=True)))
     typer.echo(f"Классификатор сохранён: {path}")
+
+
+@app.command("train-tabpfn")
+def train_tabpfn_cmd(
+    dataset: Path = typer.Option(..., exists=True, help="Выборка признаков эксперимента: analytics/experiments/out/gap_v2_dataset.csv"),
+    scores: Path = typer.Option(None, exists=True, help="Прогнозы вне обучения (gap_tabpfn_scores.csv): из них берутся пороги тревоги"),
+    results: Path = typer.Option(None, exists=True, help="Метрики проверки (gap_tabpfn.json): показываются рядом с оценкой"),
+    out: Path = typer.Option(Path("models/tabpfn_gap"), help="Куда положить train.csv и meta.json"),
+    rows: int = typer.Option(10_000, min=500, max=10_000, help="Сколько обучающих строк хранить (TabPFN рассчитан на ~10 000)"),
+) -> None:
+    """Готовит файлы для ML-оценки риска разрыва (TabPFN). Сам TabPFN здесь не нужен: он подключается при первом запросе."""
+    from datetime import date
+
+    from sklearn.metrics import f1_score, precision_recall_curve
+
+    from app.domain.gap_features import FEATURES, HORIZONS
+
+    df = pd.read_csv(dataset)
+    industries = sorted(df["industry"].dropna().unique().tolist())
+    df["industry_code"] = df["industry"].map({name: i for i, name in enumerate(industries)})
+    train = df.sample(n=min(rows, len(df)), random_state=7)[FEATURES + ["y"]]
+    thresholds: dict[str, dict[str, float]] = {}
+    if scores is not None:
+        sc = pd.read_csv(scores)
+        grid = [round(0.03 + 0.02 * i, 2) for i in range(47)]
+        for h in HORIZONS:
+            d = sc[sc["h"] == h]
+            balanced = max(grid, key=lambda t: f1_score(d["y"], d["score"] >= t))
+            p, r, t = precision_recall_curve(d["y"], d["score"])
+            ok = [i for i in range(len(t)) if r[i] >= 0.8]
+            high_recall = float(t[max(ok, key=lambda i: p[i])]) if ok else balanced
+            thresholds[str(h)] = {"balanced": balanced, "high_recall": round(high_recall, 3)}
+    meta = {"model": "TabPFN v2 (Prior Labs, лицензия Apache 2.0 с указанием автора)", "features": FEATURES, "industries": industries,
+            "thresholds": thresholds, "trained_rows": len(train), "created": date.today().isoformat(),
+            "cv": json.loads(results.read_text(encoding="utf-8")) if results is not None else None,
+            "note": "Пороги подобраны по прогнозам вне обучения (кросс-валидация по компаниям)."}
+    out.mkdir(parents=True, exist_ok=True)
+    train.to_csv(out / "train.csv", index=False)
+    (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+    typer.echo(f"Готово: {out}  (строк {len(train):,}, отраслей {len(industries)}, пороги: {'есть' if thresholds else 'нет'})")
 
 
 if __name__ == "__main__":

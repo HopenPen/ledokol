@@ -59,6 +59,7 @@ const base = computed(() => `/companies/${route.params.id}`)
 const tabs = [
   { to: '', label: 'Главная' },
   { to: 'operations', label: 'Операции' },
+  { to: 'models', label: 'Модели' },
   { to: 'scenarios', label: 'Сценарии' },
   { to: 'plan-fact', label: 'План-факт' },
   { to: 'sources', label: 'Источники' },

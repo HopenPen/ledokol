@@ -24,7 +24,10 @@ dependencies = [
 [project.optional-dependencies]
 llm = ["openai>=1.40"]
 mcp = ["mcp>=1.2"]
-ml = ["catboost>=1.2"]
+ml = [
+    "catboost>=1.2",
+    "pyarrow>=26.0.0",
+]
 
 # Окружение — через uv: `uv sync` (dev-группа ставится по умолчанию), `uv sync --extra llm --extra ml`.
 [dependency-groups]
