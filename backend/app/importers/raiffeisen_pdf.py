@@ -34,8 +34,8 @@ def parse_pdf(raw: bytes) -> list[BankStatement]:
 
 
 def _read_tables(text: str, tables: list) -> BankStatement:
-    if "Райффайзен" not in text or "Account statement" not in text:
-        raise StatementFormatError("Сейчас поддерживаются текстовые PDF-выписки Райффайзенбанка; используйте TXT для другого банка")
+    if "Account statement" not in text:
+        raise StatementFormatError("Не найден заголовок текстовой PDF-выписки Account statement; используйте TXT или CSV")
     accounts = set(re.findall(r"Account number:\s*(\d{20})", text))
     if len(accounts) != 1 or not re.search(r"Account currency:\s*(810|643)\b", text):
         raise StatementFormatError("В PDF должен быть один рублёвый счёт")

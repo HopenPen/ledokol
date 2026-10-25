@@ -37,7 +37,7 @@ function onDrop(ev: DragEvent) { over.value = false; send(ev.dataTransfer?.files
     <FileUp v-if="!busy" class="z-ico" aria-hidden="true" />
     <LoaderCircle v-else class="z-ico spin" aria-hidden="true" />
     <p class="z-title">{{ busy ? 'Разбираем выписку…' : 'Перетащите файл выписки сюда' }}</p>
-    <p class="small muted">CSV, TXT в формате 1С (1CClientBankExchange) или текстовый PDF Райффайзенбанка</p>
+    <p class="small muted">CSV, TXT в формате 1С (1CClientBankExchange) или текстовая PDF-выписка</p>
     <label class="btn btn-primary" :for="id">Выбрать файл</label>
     <input :id="id" class="visually-hidden" type="file" accept=".csv,.txt,.pdf" :disabled="busy" @change="onInput" />
     <p v-if="error" class="error" role="alert">{{ error }}</p>

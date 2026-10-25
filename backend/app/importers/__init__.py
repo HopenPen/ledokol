@@ -28,7 +28,7 @@ def parse_statement(raw: bytes, filename: str = "statement.csv") -> ParsedImport
             raise StatementFormatError("В файле нет подходящих платежей")
         return ParsedImport(frame)
     else:
-        raise StatementFormatError("Поддерживаются CSV, TXT 1CClientBankExchange и текстовые PDF Райффайзенбанка")
+        raise StatementFormatError("Поддерживаются CSV, TXT 1CClientBankExchange и текстовые PDF-выписки совместимого формата")
     rows = [row for statement in statements for row in statement.operation_rows()]
     if not rows:
         raise StatementFormatError("В выписке нет платежей")
