@@ -232,5 +232,25 @@ backend/models/
 .out/
 data/
 results/
-backtest/
+/results/
+/backtest/
+/backend/backtest/
 .csv
+
+# артефакты обучения
+catboost_out/
+catboost_info/
+analytics/catboost_out/
+analytics/catboost_info/
+mbd/
+1c/
+
+# flownix
+.flownix
+.ai-flow
+analytics/experiments/out/
+
+# ключи
+kaggle.json
+access_token
+analytics/external/

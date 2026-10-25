@@ -14,6 +14,7 @@ export const router = createRouter({
       component: () => import('./views/CompanyLayout.vue'),
       children: [
         { path: '', component: () => import('./views/ForecastView.vue'), meta: { title: 'Главная' } },
+        { path: 'models', component: () => import('./views/ModelsView.vue'), meta: { title: 'Модели' } },
         { path: 'scenarios', component: () => import('./views/ScenariosView.vue') },
         { path: 'operations', component: () => import('./views/OperationsView.vue') },
         { path: 'plan-fact', component: () => import('./views/PlanFactView.vue') },
@@ -23,8 +24,10 @@ export const router = createRouter({
   ],
 })
 
+// VITE_NO_AUTH=1 — локальный просмотр с бэкендом CASHFLOW_DEV_NO_AUTH=1: вход не нужен.
+const noAuth = import.meta.env.VITE_NO_AUTH === '1'
 router.beforeEach((to) => {
-  if (!to.meta.public && !isLoggedIn()) return '/login'
+  if (!to.meta.public && !noAuth && !isLoggedIn()) return '/login'
   if (to.meta.public && isLoggedIn() && (to.path === '/login' || to.path === '/register')) return '/companies'
   return true
 })

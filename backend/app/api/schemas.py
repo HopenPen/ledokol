@@ -205,6 +205,8 @@ class PointOut(BaseModel):
     p50: float
     p90: float
     prob_below: float
+    p25: float | None = None
+    p75: float | None = None
 
 
 class FutureEventOut(BaseModel):
@@ -260,7 +262,7 @@ class ForecastOut(BaseModel):
     def of(cls, r: ForecastResult) -> ForecastOut:
         return cls(as_of=r.as_of, last_balance=r.last_balance, threshold=r.threshold, headline=r.headline,
                    low_history=r.low_history, warnings=r.data_warnings,
-                   points=[PointOut(date=p.day, p10=p.p10, p50=p.p50, p90=p.p90, prob_below=p.prob_below)
+                   points=[PointOut(date=p.day, p10=p.p10, p50=p.p50, p90=p.p90, prob_below=p.prob_below, p25=p.p25, p75=p.p75)
                            for p in r.points],
                    events=[FutureEventOut.of(e) for e in r.events], alerts=[AlertOut.of(a) for a in r.alerts])
 

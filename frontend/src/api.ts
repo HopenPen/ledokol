@@ -1,7 +1,7 @@
 // Тонкий клиент к FastAPI. Токен — в sessionStorage: F5 не разлогинивает, закрыл вкладку — вышел.
 // localStorage не используем: токен жил бы бессрочно и был бы виден всем вкладкам. В бою — вход через банк.
 
-export interface Point { date: string; p10: number; p50: number; p90: number; prob_below: number }
+export interface Point { date: string; p10: number; p50: number; p90: number; prob_below: number; p25?: number | null; p75?: number | null }
 export interface FutureEvent {
   date: string; amount: number; direction: 'in' | 'out'; title: string; category: string
   source: 'history' | 'calendar' | 'manual' | '1c' | 'scenario'; probability: number
@@ -13,6 +13,13 @@ export interface Alert {
 export interface Forecast {
   as_of: string; last_balance: number; threshold: number; headline: string; low_history: boolean
   warnings: string[]; points: Point[]; events: FutureEvent[]; alerts: Alert[]
+}
+export interface ModelCard {
+  key: 'hybrid' | 'catboost' | 'ensemble'; title: string; available: boolean; reason?: string
+  probability?: number; threshold?: number; alert?: boolean; points?: Point[]
+}
+export interface ModelsCompare {
+  as_of: string; last_balance: number; threshold: number; models: ModelCard[]; notes: string[]
 }
 export interface Company { id: string; external_id: string; name: string; industry: string | null; tax_regime: string; min_balance: string }
 export interface Dashboard {
@@ -35,6 +42,11 @@ export interface AccountBalance {
 export interface PlanFactRow { event_id: string | null; title: string; planned_date: string; planned_amount: number; status: string; actual_amount: number; actual_date: string | null }
 export interface Attachment { id: string; operation_id: string; kind: 'receipt' | 'related'; filename: string; content_type: string; size_bytes: number; previewable: boolean; created_at: string }
 export interface ScenarioResult { base: Forecast; scenario: Forecast; delta: { base_first_gap: string | null; scenario_first_gap: string | null; base_min_p50: number; scenario_min_p50: number; extra_shortfall: number } }
+export interface EventInput {
+  event_date: string; amount: string; direction: 'in' | 'out'; title: string
+  kind: 'manual' | 'invoice_out' | 'invoice_in' | 'tax' | 'contract'
+  confidence: 'certain' | 'likely' | 'unsure'; counterparty_key?: string
+}
 
 const TOKEN_KEY = 'cashflow.token'
 function readToken(): string | null {
@@ -91,6 +103,7 @@ export const api = {
   companies: () => request<Company[]>('GET', '/api/companies'),
   createCompany: (name: string) => request<Company>('POST', '/api/companies', { name }),
   deleteCompany: (id: string) => request<void>('DELETE', `/api/companies/${id}`),
+  models: (id: string) => request<ModelsCompare>('GET', `/api/companies/${id}/models`),
   company: (id: string) => request<Company>('GET', `/api/companies/${id}`),
   balance: (id: string) => request<AccountBalance>('GET', `/api/companies/${id}/balance`),
   setInitialBalance: (id: string, body: { date: string; amount: string }) => request<AccountBalance>('PUT', `/api/companies/${id}/balance/initial`, body),

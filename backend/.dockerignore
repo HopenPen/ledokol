@@ -7,5 +7,10 @@
 !migrations/
 !migrations/**
 !alembic.ini
+!models/
+!models/catboost_flow/
+!models/catboost_flow/mean.cbm
+!models/catboost_flow/quantile.cbm
+!models/catboost_flow/meta.json
 **/__pycache__/
 **/*.py[cod]

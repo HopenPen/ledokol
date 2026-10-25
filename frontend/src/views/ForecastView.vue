@@ -1,9 +1,9 @@
 <script setup lang="ts">
 // Главная: заголовок → три цифры → график и вывод → разрывы с причинами и действиями → ближайшие платежи.
 import { CalendarPlus } from 'lucide-vue-next'
-import { computed, inject, ref, type Ref } from 'vue'
+import { computed, inject, ref, watch, type Ref } from 'vue'
 import { useRoute } from 'vue-router'
-import type { AccountBalance, Dashboard } from '../api'
+import { api, type AccountBalance, type Dashboard, type ModelsCompare, type Point } from '../api'
 import AddEventModal from '../components/AddEventModal.vue'
 import AlertCard from '../components/AlertCard.vue'
 import BalanceChart from '../components/BalanceChart.vue'
@@ -38,6 +38,31 @@ const runway = computed(() => {
 })
 const minPoint = computed(() => f.value?.points.reduce((m, p) => (p.p50 < m.p50 ? p : m), f.value.points[0]) ?? null)
 const upcoming = computed(() => (f.value?.events ?? []).slice(0, showAll.value ? 60 : 8))
+
+// Выбор модели для графика: гибрид (основной, из него заголовок и предупреждения), CatBoost и ансамбль.
+const compareData = ref<ModelsCompare | null>(null)
+const compareError = ref('')
+const picked = ref('hybrid')
+const userPicked = ref(false)
+const overlay = ref('')
+const OPTIONS = [{ key: 'hybrid', label: 'Гибрид' }, { key: 'catboost', label: 'CatBoost' },
+                 { key: 'ensemble', label: 'Ансамбль' }]
+async function loadCompare() {
+  compareError.value = ''
+  try {
+    compareData.value = await api.models(route.params.id as string)
+    if (!userPicked.value && compareData.value.models.find((m) => m.key === 'ensemble')?.available) picked.value = 'ensemble'
+  } catch { compareError.value = 'Не удалось получить прогнозы моделей' }
+}
+watch(dashboard, () => { compareData.value = null; if (dashboard.value) loadCompare() }, { immediate: true })
+function pick(key: string) { userPicked.value = true; picked.value = key; if (overlay.value === key) overlay.value = '' }
+function pointsOf(key: string): Point[] | null {
+  if (key === 'hybrid') return null
+  return compareData.value?.models.find((m) => m.key === key && m.available)?.points ?? null
+}
+const shownPoints = computed(() => pointsOf(picked.value) ?? f.value?.points ?? [])
+const overlayPoints = computed(() => (overlay.value ? (overlay.value === 'hybrid' ? f.value?.points : pointsOf(overlay.value)) : undefined) ?? undefined)
+const labelOf = (key: string) => OPTIONS.find((o) => o.key === key)?.label ?? key
 
 async function onSaved() {
   adding.value = false
@@ -82,7 +107,19 @@ async function onSaved() {
           <h2>Остаток на счёте</h2>
           <span class="small muted">Прогноз на {{ f.points.length }} рабочих дней</span>
         </div>
-        <BalanceChart :history="dashboard.history" :points="f.points" :threshold="f.threshold" :events="f.events" :alerts="f.alerts" />
+        <div class="models" role="group" aria-label="Какой моделью строить прогноз">
+          <span class="small muted">Прогноз:</span>
+          <button v-for="o in OPTIONS" :key="o.key" class="mbtn" :class="{ on: picked === o.key }" :aria-pressed="picked === o.key" @click="pick(o.key)">{{ o.label }}</button>
+          <span class="small muted">Сравнить с:</span>
+          <select v-model="overlay" aria-label="Сравнить с моделью">
+            <option value="">ничем</option>
+            <option v-for="o in OPTIONS.filter((x) => x.key !== picked)" :key="o.key" :value="o.key">{{ o.label }}</option>
+          </select>
+        </div>
+        <BalanceChart :history="dashboard.history" :points="shownPoints" :threshold="f.threshold" :events="f.events" :alerts="f.alerts"
+                      :compare="overlayPoints" :compare-label="overlay ? labelOf(overlay) : undefined" />
+        <p v-if="picked !== 'hybrid'" class="small muted">Вывод ниже и предупреждения считает основной гибрид. На графике: {{ labelOf(picked) }}.</p>
+        <p v-if="compareError" class="small muted">{{ compareError }}</p>
         <section class="answer" :class="tone">
           <h2>{{ firstGap ? `Дальше кассовый разрыв в ${money(firstGap.shortfall)}` : 'Кассового разрыва в прогнозе не видно' }}</h2>
           <p v-if="firstGap" class="small muted">
@@ -134,6 +171,10 @@ async function onSaved() {
 </template>
 
 <style scoped>
+.models { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 8px; }
+.mbtn { padding: 4px 12px; font-size: 13px; border: 1px solid var(--line, #d0d7de); border-radius: 8px; background: #fff; cursor: pointer; }
+.mbtn.on { border-color: var(--brand); color: var(--brand); font-weight: 600; }
+.models select { padding: 5px 8px; border-radius: 8px; border: 1px solid var(--line, #d0d7de); }
 .loading { display: grid; gap: 16px; }
 .home { display: grid; gap: 20px; }
 .answer { margin-top: 20px; padding-left: 20px; border-left: 4px solid var(--brand); }

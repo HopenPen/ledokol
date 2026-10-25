@@ -37,6 +37,15 @@ class Settings(BaseSettings):
     forecast_sims: int = 1000
     forecast_seed: int = 7
 
+    # Необязательный ML-модуль оценки риска разрыва (TabPFN). Файлы создаёт команда `cashflow train-tabpfn`;
+    # без них или без пакета tabpfn эндпоинт /ml-risk отвечает «недоступно», остальное приложение работает как обычно.
+    ml_flow_dir: str = "models/catboost_flow"   # CatBoost v2: прогноз остатка и ансамбль с гибридом
+    ml_gap_dir: str = "models/tabpfn_gap"
+    ml_gap_cpu_rows: int = 2000   # на процессоре TabPFN медленный: берём меньше обучающих строк
+
+    # Только для локального просмотра: вход не требуется, все запросы идут от пользователя dev. В prod запрещено.
+    dev_no_auth: bool = False
+
     demo_user: str = "demo"
     demo_password: SecretStr | None = None
 
@@ -62,6 +71,8 @@ class Settings(BaseSettings):
     def _prod_guards(self) -> Settings:
         if self.env == "prod" and self.jwt_secret.get_secret_value() == _DEV_SECRET:
             raise ValueError("CASHFLOW_JWT_SECRET must be set in prod")
+        if self.env == "prod" and self.dev_no_auth:
+            raise ValueError("CASHFLOW_DEV_NO_AUTH must not be set in prod")
         if self.env == "prod" and self.smtp_host and (self.smtp_security == "none" or self.public_app_url.scheme != "https"):
             raise ValueError("Production email verification requires HTTPS and encrypted SMTP")
         if self.llm_provider == "openai" and not (self.llm_api_key and self.llm_model):

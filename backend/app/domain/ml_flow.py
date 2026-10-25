@@ -31,7 +31,7 @@ from app.domain.pipeline import PreparedCompany
 
 QUANTILES = (0.1, 0.5, 0.9)
 CAT_FEATURES = ["industry", "target_dow", "source"]
-NON_FEATURES = ["y", "weight", "company"]   # служебные колонки, в модель не идут
+NON_FEATURES = ["y", "weight", "company", "cutoff", "scale"]   # служебные колонки; scale — чтобы вернуть прогноз в рубли
 
 
 def statistical_flow(prep: PreparedCompany, recurring_index: set[int] | None = None) -> pd.Series:
@@ -52,14 +52,20 @@ def scale_of(flow: pd.Series | np.ndarray) -> float:
 
 
 def make_rows(flow: pd.Series, industry: str, horizon: int = 30, step: int = 5, min_history: int = 60,
-              after_gap: np.ndarray | None = None, source: str = "case", company: str = "") -> pd.DataFrame:
+              after_gap: np.ndarray | None = None, source: str = "case", company: str = "",
+              horizons: list[int] | None = None, cutoff_range: tuple | None = None) -> pd.DataFrame:
     """Обучающие строки по одной компании. Окна, задевающие «дыры» выписки, пропускаем.
 
     Всё в долях масштаба компании (scale_of по истории до отсечки) — чтобы смешивать с внешними датасетами.
+    horizons — какие горизонты брать (для обучения хватает выборки, для оценки нужны все 1..horizon);
+    cutoff_range — (с, по) даты отсечек, чтобы обучение и проверка не пересекались во времени.
     """
     vals, dates = flow.to_numpy(dtype=float), flow.index
     rows = []
+    hs = horizons or list(range(1, horizon + 1))
     for t in range(min_history, len(vals) - 1, step):
+        if cutoff_range is not None and not (cutoff_range[0] <= dates[t] <= cutoff_range[1]):
+            continue
         hist = vals[: t + 1]
         sc = scale_of(hist[-60:])
         h_n = hist / sc
@@ -69,15 +75,80 @@ def make_rows(flow: pd.Series, industry: str, horizon: int = 30, step: int = 5, 
             "mean_5": h_n[-5:].mean(), "mean_20": h_n[-20:].mean(), "mean_60": h_n[-60:].mean(),
             "std_20": h_n[-20:].std(), "share_pos_20": (h_n[-20:] > 0).mean(),
         }
-        for h in range(1, horizon + 1):
-            if t + h >= len(vals) or (after_gap is not None and after_gap[t + h]):
+        for h in hs:
+            if t + h >= len(vals) or (after_gap is not None and after_gap[t + 1: t + h + 1].any()):
                 break
             d = dates[t + h]
             same_dow = h_n[-40:][dows[-40:] == d.day_of_week]   # тот же день недели за последние ~8 недель
-            rows.append({**feats, "h": h, "target_dow": str(d.day_of_week), "target_dom": d.day,
+            rows.append({**feats, "cutoff": dates[t], "scale": sc, "h": h, "target_dow": str(d.day_of_week), "target_dom": d.day,
                          "target_month": d.month, "days_to_28": (28 - d.day) % 31,
                          "same_dow_mean_8w": same_dow.mean() if same_dow.size else 0.0,
                          "y": vals[t + h] / sc})
+    return pd.DataFrame(rows)
+
+
+def operational_flow(prep: PreparedCompany) -> pd.Series:
+    """Весь дневной поток, который прогноз обязан предсказать: без денег владельца, своих переводов и кредитов.
+
+    В отличие от statistical_flow, здесь остаются налоги и регулярные платежи — для v2 модель учит всё сразу.
+    """
+    ops = prep.ops[prep.ops["quality"].isin(["ok", "after_gap"]) & ~prep.ops["category"].isin(EXCLUDED_FROM_FORECAST)]
+    flow = ops.groupby("operation_date")["signed"].sum()
+    return flow.reindex(pd.DatetimeIndex(prep.panel["date"]), fill_value=0.0)
+
+
+def _tax_days(dates: pd.DatetimeIndex) -> np.ndarray:
+    """Первый рабочий день с числом ≥ 28 в каждом месяце — туда ложится ЕНП (28-е с переносом)."""
+    key = dates.year * 12 + dates.month
+    first = pd.Series(dates.day >= 28).groupby(key).transform(lambda s: s & ~s.shift(fill_value=False).cummax())
+    return first.to_numpy()
+
+
+def make_cum_rows(flow: pd.Series, industry: str, horizon: int = 30, step: int = 3, min_history: int = 60,
+                  after_gap: np.ndarray | None = None, source: str = "case", company: str = "",
+                  horizons: list[int] | None = None, positions: list[int] | None = None,
+                  max_target_date: pd.Timestamp | None = None) -> pd.DataFrame:
+    """v2: строка = (компания, отсечка, h), цель — НАКОПЛЕННЫЙ поток за h рабочих дней в долях масштаба.
+
+    Почему так. v1 учила медиану дневного потока, а остаток — это сумма потоков: сумма медиан ≠ медиана суммы,
+    и на горизонте 30 ошибка остатка выходила хуже наивного прогноза. Здесь модель сразу учит то, что нужно
+    остатку: остаток через h дней = остаток сегодня + scale × прогноз.
+
+    Признаки «то же окно месяц и два назад» (lag1/lag2) переносят ритм зарплат, аренды и налогов. Сдвиг кратен
+    21 рабочему дню и не меньше h — окно лага целиком в прошлом, утечки нет.
+    positions — явные индексы отсечек (для оценки на тех же окнах, что бэктест);
+    max_target_date — обучающие окна должны закончиться раньше начала проверки (иначе утечка по времени).
+    """
+    vals, dates = flow.to_numpy(dtype=float), flow.index
+    cum = np.r_[0.0, np.cumsum(vals)]
+    tax = _tax_days(dates)
+    hs = horizons or list(range(1, horizon + 1))
+    ts = positions if positions is not None else range(min_history, len(vals) - 1, step)
+    rows = []
+    for t in ts:
+        hist = vals[: t + 1]
+        sc = scale_of(hist[-60:])
+        h_n = hist / sc
+        base = {
+            "industry": industry, "source": source, "company": company, "cutoff": dates[t], "scale": sc,
+            "mean_5": h_n[-5:].mean(), "mean_20": h_n[-20:].mean(), "mean_60": h_n[-60:].mean(),
+            "std_20": h_n[-20:].std(), "share_pos_20": (h_n[-20:] > 0).mean(),
+            "cutoff_dom": dates[t].day,
+        }
+        for h in hs:
+            end = t + h
+            if end >= len(vals) or (after_gap is not None and after_gap[t + 1: end + 1].any()):
+                break
+            if max_target_date is not None and dates[end] >= max_target_date:
+                break
+            lag = 21 * int(np.ceil(h / 21))
+            lag1 = (cum[end - lag + 1] - cum[t - lag + 1]) / sc if t - lag >= 0 else np.nan
+            lag2 = (cum[end - lag - 20] - cum[t - lag - 20]) / sc if t - lag - 21 >= 0 else np.nan
+            d = dates[end]
+            rows.append({**base, "h": h, "target_dow": str(d.day_of_week), "target_dom": d.day,
+                         "target_month": d.month, "n_tax_days": int(tax[t + 1: end + 1].sum()),
+                         "mean60_x_h": base["mean_60"] * h, "lag1": lag1, "lag2": lag2,
+                         "y": (cum[end + 1] - cum[t + 1]) / sc})
     return pd.DataFrame(rows)
 
 

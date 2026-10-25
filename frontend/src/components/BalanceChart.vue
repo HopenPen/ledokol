@@ -33,9 +33,12 @@ function render() {
   const last = hist.at(-1)
   const joint = last ? [[last.date, last.balance]] : []      // прогноз продолжает факт, без разрыва линии
   const p50 = [...joint, ...props.points.map((p) => [p.date, p.p50])]
-  const lower = [...joint, ...props.points.map((p) => [p.date, p.p10])]
-  const band = [...(last ? [[last.date, 0]] : []), ...props.points.map((p) => [p.date, p.p90 - p.p10])]
-  const values = [...hist.map((h) => h.balance), ...props.points.flatMap((p) => [p.p10, p.p90]),
+  // Коридор «обычного» разброса — P25–P75 (если есть), иначе P10–P90; крайние сценарии остаются в подсказке и в рисках.
+  const lo25 = (p: Point) => p.p25 ?? p.p10
+  const hi75 = (p: Point) => p.p75 ?? p.p90
+  const lower = [...joint, ...props.points.map((p) => [p.date, lo25(p)])]
+  const band = [...(last ? [[last.date, 0]] : []), ...props.points.map((p) => [p.date, hi75(p) - lo25(p)])]
+  const values = [...hist.map((h) => h.balance), ...props.points.flatMap((p) => [lo25(p), hi75(p)]),
     ...(props.compare ?? []).map((p) => p.p50), props.threshold]
   const lo = Math.min(...values)
   const hi = Math.max(...values)
@@ -62,7 +65,8 @@ function render() {
         if (h && !p) rows.push(`Было на счёте: <b>${money(h.balance)}</b>`)
         if (p) {
           rows.push(`Прогноз: <b>${money(Math.round(p.p50))}</b>`)
-          rows.push(`<span style="color:${t.ink2}">Обычный разброс: ${rub(p.p10)} … ${rub(p.p90)}</span>`)
+          rows.push(`<span style="color:${t.ink2}">Обычный разброс: ${rub(p.p25 ?? p.p10)} … ${rub(p.p75 ?? p.p90)}</span>`)
+          if (p.p25 != null) rows.push(`<span style="color:${t.ink2}">Крайние случаи (10% и 90%): ${rub(p.p10)} … ${rub(p.p90)}</span>`)
           if (p.prob_below >= 0.05) rows.push(`<span style="color:${t.risk}">Шанс нехватки: ${percent(p.prob_below)}</span>`)
         }
         if (c) rows.push(`${escape(props.compareLabel)}: <b>${money(Math.round(c.p50))}</b>`)
